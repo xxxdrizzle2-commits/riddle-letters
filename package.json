@@ -3,9 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "谜语书信四角色互动 Demo",
+  "description": "谜语书信四角色互动 Demo · V2 体验优化",
   "dependencies": {
-    "@cloudbase/js-sdk": "3.10.3",
     "@hookform/resolvers": "5.2.2",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

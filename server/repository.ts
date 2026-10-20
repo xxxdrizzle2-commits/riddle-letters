@@ -5,7 +5,7 @@ const PARTS = ['accounts', 'applications', 'invites', 'consents', 'privacyReques
 type Part = typeof PARTS[number]
 type PersistedMeta = { revision: number; clock: string; version: 1 }
 const MAX_PART_BYTES = 12 * 1024 * 1024
-const COLLECTION = process.env.V1_DB_COLLECTION || 'riddle_v1_workspace'
+const COLLECTION = process.env.CLOUDBASE_PROTOTYPE_DB_COLLECTION || 'riddle_cloudbase_prototype_workspace'
 const ENV = process.env.CLOUDBASE_ENV_ID || process.env.SCB_ENV || ''
 
 export function createCloudApp() {

@@ -13,7 +13,7 @@ const ORPHAN_AGE_MS = 24 * 3600000
 const asPayload = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 const validPassword = (password: unknown): password is string => typeof password === 'string' && password.length >= 8 && password.length <= 32 && [/[a-z]/, /[A-Z]/, /\d/, /[^\w]/].filter(pattern => pattern.test(password)).length >= 3
 function requirePilotReady() {
-  if (process.env.V1_PILOT_READY !== 'true') throw new ServiceError('PILOT_NOT_READY', '正式试用尚未开放，请先使用独立演示版')
+  if (process.env.CLOUDBASE_PROTOTYPE_PILOT_READY !== 'true') throw new ServiceError('PILOT_NOT_READY', 'CloudBase 原型未启用；当前 V2 只提供本地合成数据演示')
 }
 
 function manager() {

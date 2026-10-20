@@ -11,7 +11,7 @@ function write(state: AppState, authorId = 'c1', id = 'new', extra: Partial<Extr
 const submit = (s: AppState, id = 'new', author = 'c1', coveredLetterIds?: string[]) => run(s, author, { type: 'submit-letter', id, coveredLetterIds })
 const approve = (s: AppState, id = 'new') => run(s, 'op1', { type: 'review-letter', id, decision: 'approved', note: '' })
 
-describe('V1 写信、审核与持续回应', () => {
+describe('V2 写信、审核与持续回应', () => {
   it('孩子可以主动写信，标题自动生成，无作文最低字数门槛', () => {
     let state = write(seed())
     expect(state.letters.find(l => l.id === 'new')!.recipientId).toBe('v1')
