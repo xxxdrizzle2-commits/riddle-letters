@@ -1,0 +1,9 @@
+{
+  "name": "riddle-letter-v1-service",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "scripts": { "check": "tsc --project tsconfig.json --noEmit", "build": "node build.mjs", "bootstrap": "node bootstrap.mjs" },
+  "dependencies": { "@cloudbase/node-sdk": "3.18.7", "@cloudbase/manager-node": "5.9.1", "sharp": "0.34.5" },
+  "devDependencies": { "esbuild": "0.28.2", "@cloudbase/js-sdk": "3.10.3" }
+}

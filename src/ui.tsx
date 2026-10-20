@@ -2,8 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowRight, Feather, Leaf, Mail, Check, HelpCircle } from 'lucide-react'
 import type { AppState, Letter, Person } from './types'
 import { formatDate, riddles } from './data'
+import { downloadAttachment } from './services/cloud'
 
-export interface PageProps { state: AppState; actor: Person; notify: (message: string) => void }
+export interface PageProps { state: AppState; actor: Person; notify: (message: string) => void; mode?: 'demo' | 'live' }
 export function PageHeader({ eyebrow, title, description, children }: { eyebrow?: string; title: string; description?: string; children?: ReactNode }) {
   return <header className="page-header"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1>{description && <p className="muted">{description}</p>}</div>{children && <div className="toolbar">{children}</div>}</header>
 }
@@ -25,9 +26,20 @@ export function useAction(notify: (message: string) => void) {
   return { busy, error, run }
 }
 export function AttachmentView({ state, id }: { state: AppState; id?: string }) {
-  const attachment = state.attachments.find(a => a.id === id); const [url, setUrl] = useState('')
-  useEffect(() => { if (!attachment) { setUrl(''); return }; const objectUrl = URL.createObjectURL(attachment.blob); setUrl(objectUrl); return () => URL.revokeObjectURL(objectUrl) }, [attachment])
-  return attachment && url ? <figure className="attachment"><img src={url} alt={`演示手写回信：${attachment.name}`} /><figcaption>{attachment.name} · 演示附件</figcaption></figure> : null
+  const attachment = state.attachments.find(a => a.id === id)
+  const [url, setUrl] = useState(''), [error, setError] = useState(false), [retry, setRetry] = useState(0)
+  useEffect(() => {
+    if (!attachment) { setUrl(''); setError(false); return }
+    let cancelled = false, objectUrl = ''
+    setUrl(''); setError(false)
+    const show = (blob: Blob) => { if (cancelled) return; objectUrl = URL.createObjectURL(blob); setUrl(objectUrl) }
+    if (attachment.blob) show(attachment.blob)
+    else void downloadAttachment(attachment.id).then(show).catch(() => { if (!cancelled) setError(true) })
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
+  }, [attachment?.id, attachment?.blob, retry])
+  if (!attachment) return null
+  if (error) return <div className="notice error" role="alert" data-attachment-status="error">手写图片暂时打不开。<button type="button" className="text-button" onClick={() => setRetry(value => value + 1)}>重试加载图片</button></div>
+  return url ? <figure className="attachment" data-attachment-status="ready"><img src={url} alt={`手写信附件：${attachment.name}`} /><figcaption>{attachment.name}</figcaption></figure> : <p className="muted small" role="status" data-attachment-status="loading">正在打开手写图片…</p>
 }
 export function RiddleBlock({ id }: { id: string }) {
   const riddle = riddles.find(r => r.id === id); const [hint, setHint] = useState(false), [answer, setAnswer] = useState(false)
@@ -42,5 +54,6 @@ export const moderationLabel = { draft: '草稿', pending: '等待审核', retur
 export function LetterBadge({ state, letter }: { state: AppState; letter: Letter }) {
   const d = state.deliveries.find(d => d.letterId === letter.id)
   if (letter.moderation !== 'approved') return <Badge tone={letter.moderation === 'returned' ? 'warning' : 'neutral'}>{moderationLabel[letter.moderation]}</Badge>
-  return <Badge tone="success">{d?.readAt ? '已阅读' : d?.deliveredAt ? '已送达' : d?.printedAt ? '已打印 · 待交付' : '待打印'}</Badge>
+  const pair = state.pairs.find(p => p.id === letter.pairId)
+  return <Badge tone={pair?.status === 'paused' && !d?.deliveredAt ? 'warning' : 'success'}>{d?.readAt ? '已阅读' : d?.deliveredAt ? '已送达' : pair?.status === 'paused' ? '审核通过 · 暂缓投递' : d?.printedAt ? '已打印 · 待交付' : pair?.channel === 'paper' ? '待打印' : '审核通过 · 待送达'}</Badge>
 }
