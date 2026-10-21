@@ -60,7 +60,7 @@ export function ChildPage(props: PageProps) {
     {!unread && pending && <section className="v2-status-card" aria-label="信件进度">
       <Mail size={19}/><p>你写的《{pending.title}》正在等待运营审核，通过后才会送给伙伴。</p><ContextLink id={`child-letter-${pending.id}`} className="text-button" to={`/letters/${pending.id}`} returnLabel="返回信箱" focusId={`child-letter-${pending.id}`}>查看进度<ArrowRight size={16}/></ContextLink>
     </section>}
-    <Link className="v2-history-link" to="/correspondence"><span><strong>看看我们的信</strong><small>{partner ? `和${partner.nickname}的来信、回信与草稿都在这里。` : '写过的自我介绍会在这里。'}</small></span><ArrowRight size={18}/></Link>
+    <Link className="v2-history-link" to="/correspondence"><span><strong>看看我们的信</strong><small>{partner ? `和${partner.nickname}的来信、回信与草稿都在这里。` : '收到的信、写过的信和草稿都在这里。'}</small></span><ArrowRight size={18}/></Link>
   </div>
 }
 
