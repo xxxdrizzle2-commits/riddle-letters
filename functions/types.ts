@@ -5,8 +5,6 @@ export interface V3Env {
   V3_MODE?: string
   BETTER_AUTH_SECRET?: string
   BETTER_AUTH_URL?: string
-  V3_ACCESS_TEAM_DOMAIN?: string
-  V3_ACCESS_AUD?: string
 }
 
 export interface PagesContext<E = V3Env> {

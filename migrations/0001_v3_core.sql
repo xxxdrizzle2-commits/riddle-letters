@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS app_deliveries (
 );
 CREATE TABLE IF NOT EXISTS app_reply_tasks (
   id TEXT PRIMARY KEY,
-  letter_id TEXT NOT NULL UNIQUE,
+  letter_id TEXT NOT NULL,
   pair_id TEXT NOT NULL,
   recipient_id TEXT,
   status TEXT NOT NULL,
@@ -106,6 +106,7 @@ CREATE TABLE IF NOT EXISTS app_reply_tasks (
   data_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS app_reply_tasks_recipient_due ON app_reply_tasks(recipient_id, status, due_at);
+CREATE UNIQUE INDEX IF NOT EXISTS app_reply_tasks_letter ON app_reply_tasks(letter_id) WHERE letter_id <> '';
 CREATE TABLE IF NOT EXISTS app_reviews (
   id TEXT PRIMARY KEY,
   letter_id TEXT NOT NULL,
