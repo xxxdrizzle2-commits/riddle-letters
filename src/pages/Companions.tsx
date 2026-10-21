@@ -80,16 +80,20 @@ export function VolunteerPage(props: PageProps) {
   const pair = activePair(state, actor)
   const child = state.people.find(person => person.id === pair?.childId)
   const letters = visibleLetters(state, actor)
+  const unreadIncoming = letters.filter(letter => letter.pairId === pair?.id && letter.authorId !== actor.id && state.deliveries.some(delivery => delivery.letterId === letter.id && delivery.deliveredAt && !delivery.readAt))
+    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0]
   const drafts = letters.filter(letter => letter.authorId === actor.id && (!letter.pairId || letter.pairId === pair?.id) && ['draft', 'returned'].includes(letter.moderation))
   const returned = drafts.find(letter => letter.moderation === 'returned')
   const draft = drafts.find(letter => letter.moderation === 'draft')
   const groups = groupedResponseTasks(state, actor.id).filter(group => group.pairId === pair?.id)
   const due = groups.find(group => group.status === 'awaiting')
   const review = groups.find(group => group.status === 'review')
-  const chosenGroup = !returned && due ? due : !returned && !draft && review ? review : undefined
-  const chosenDraft = returned || (!due ? draft : undefined)
+  const chosenGroup = !unreadIncoming && !returned && due ? due : !unreadIncoming && !returned && !draft && review ? review : undefined
+  const chosenDraft = !unreadIncoming ? returned || (!due ? draft : undefined) : undefined
   const priority: TaskLink = !pair
     ? {label: '查看加入进度', detail: '结对后会在这里看到第一封信的任务。', to: '/account'}
+    : unreadIncoming
+      ? {label: `${child?.nickname || '伙伴'}${unreadIncoming.replyTo ? '已回信' : '写来一封信'}，先读来信`, detail: '来信已经送达，等你打开阅读。读完后再安排回应。', to: `/letters/${unreadIncoming.id}`, sourceTitle: unreadIncoming.title}
     : returned
       ? {label: '修改后重新提交', detail: '审核意见已附在原稿上，修改后还需要再次提交审核。', to: `/write/${returned.id}`, sourceTitle: returned.title}
       : due
@@ -187,7 +191,7 @@ export function LetterDetail(props: PageProps) {
     <div className="reading-grid">
       <div className="v2-paper-column"><LetterPaper state={state} letter={letter}/>{canReply && !sentReply && <ContextLink id="letter-reply-after-paper" className="btn v2-reply-after-paper" to={reply ? `/write/${reply.id}` : `/write?pair=${pair!.id}&replyTo=${id}`} returnLabel="返回来信" focusId="letter-reply-after-paper"><Feather size={18}/>{reply ? '接着写回信' : '给 TA 回信'}</ContextLink>}{sentReply && <Notice>你写的回应{sentReply.moderation === 'pending' ? '正在等待运营审核' : '已经通过审核'}，这封来信不会重复催办。</Notice>}</div>
       <aside className="stack v2-reading-aside">
-        <section className="panel v2-progress-summary"><h2 className="section-title">这封信现在到哪了</h2><p>{status}</p>{delivery?.readAt && <p className="small muted">已打开阅读：{formatDate(delivery.readAt)}</p>}
+        <section className="panel v2-progress-summary"><h2 className="section-title">这封信现在到哪了</h2><p>{status}</p>{delivery?.deliveredAt && <p className="small muted">已确认送达：{formatDate(delivery.deliveredAt)}</p>}{delivery?.readAt && <p className="small muted">已打开阅读：{formatDate(delivery.readAt)}</p>}
           <details className="v2-progress-details"><summary>查看每一步</summary><ol className="timeline">
             <li className="done"><CheckCircle2 size={17}/><div><strong>认真写下</strong><span>{formatDate(letter.createdAt)}</span></div></li>
             <li className={letter.moderation === 'approved' ? 'done' : ''}><CheckCircle2 size={17}/><div><strong>{letter.moderation === 'approved' ? '已通过审核' : letter.moderation === 'pending' ? '正在等待审核' : letter.moderation === 'returned' ? '需要修改' : '还在草稿中'}</strong></div></li>

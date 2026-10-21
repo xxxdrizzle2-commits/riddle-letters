@@ -125,3 +125,23 @@ test('直接打开帮助页时，返回名称匹配当前角色的工作台', as
     await direct.close()
   }
 })
+
+test('旧标签页模块加载失败时只自动刷新一次', async ({ page }) => {
+  await page.goto('/#/demo/start/child')
+  await expect(page).toHaveURL(/#\/space/)
+  const reloaded = page.waitForEvent('load')
+  await page.evaluate(() => {
+    sessionStorage.removeItem('riddle-chunk-reload-at')
+    setTimeout(() => window.dispatchEvent(new Event('vite:preloadError', { cancelable: true })), 0)
+  })
+  await reloaded
+  await expect(page.locator('main .page-header h1')).toBeVisible()
+  const firstReload = await page.evaluate(() => Number(sessionStorage.getItem('riddle-chunk-reload-at')))
+  expect(firstReload).toBeGreaterThan(0)
+  const retriedAgain = await page.evaluate(() => {
+    const event = new Event('vite:preloadError', { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  })
+  expect(retriedAgain).toBe(false)
+})

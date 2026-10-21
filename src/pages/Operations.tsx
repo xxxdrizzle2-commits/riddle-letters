@@ -150,6 +150,10 @@ function TeacherStageWorkspace({ state, actor, notify, setDirty, registerSaveDra
   const completedLetter = !detail && detailId ? state.letters.find(letter => letter.id === detailId && pairs.some(pair => pair.id === letter.pairId)) : undefined
   const completedDelivery = state.deliveries.find(item => item.letterId === completedLetter?.id)
   const completedTask = state.tasks.find(item => item.letterId === completedLetter?.id)
+  const resultLetter = state.letters.find(letter => letter.id === searchParams.get('last'))
+  const resultRecipient = searchParams.get('recipient') === 'mixed' ? 'mixed' : resultLetter && state.people.find(person => person.id === recipientForLetter(state, resultLetter))?.role === 'volunteer' ? 'volunteer' : 'child'
+  const deliveryStatus = resultRecipient === 'mixed' ? '送达记录已保存，收件人可以分别登录阅读。' : resultRecipient === 'volunteer' ? '送达记录已保存，志愿者可以阅读孩子的回信。' : '送达记录已保存，小朋友可以阅读并准备回应。'
+  const deliveryNext = resultRecipient === 'mixed' ? '下一步由各封信的收件人分别登录阅读。' : mode === 'demo' ? `${roleLabels[resultRecipient]}演示身份接下来可以阅读并回应。` : `下一位由${roleLabels[resultRecipient]}成人测试账号登录，检查送达后的信件。`
   const selectedIds = detail ? state.pairs.find(pair => pair.id === detail.pairId)?.status === 'active' ? [detail.id] : [] : selected.filter(id => current.some(letter => letter.id === id && state.pairs.find(pair => pair.id === letter.pairId)?.status === 'active'))
   const detailPair = pairs.find(pair => pair.id === detail?.pairId)
   const printable = queues.print.filter(letter => selectedIds.includes(letter.id))
@@ -177,20 +181,22 @@ function TeacherStageWorkspace({ state, actor, notify, setDirty, registerSaveDra
   async function recordBatch(type: 'print' | 'deliver') {
     if (!confirmed || !selectedIds.length || (type === 'print' && !printOpened)) return
     const ids = [...selectedIds]
-    const ok = await run(() => dispatch(actor.id, { type, ids: selectedIds }), type === 'print' ? '已记录打印，下一步请在实际交给孩子后确认交付。' : '已确认实际交付，回信期限从今天开始计算。')
-    if (ok) { setSelected([]); setConfirmed(false); setPrintOpened(false); setSearchParams({ result: type, count: String(ids.length), last: ids.at(-1) ?? '' }, { replace: true }) }
+    const recipients = new Set(ids.map(id => state.letters.find(letter => letter.id === id)).filter((letter): letter is Letter => !!letter).map(letter => state.people.find(person => person.id === recipientForLetter(state, letter))?.role))
+    const recipient = recipients.size === 1 && recipients.has('volunteer') ? 'volunteer' : recipients.size > 1 ? 'mixed' : 'child'
+    const ok = await run(() => dispatch(actor.id, { type, ids: selectedIds }), type === 'print' ? '已记录打印，下一步请在实际交给收件人后确认交付。' : '已确认实际交付，收件人的回应期限从今天开始计算。')
+    if (ok) { setSelected([]); setConfirmed(false); setPrintOpened(false); setSearchParams({ result: type, count: String(ids.length), last: ids.at(-1) ?? '', recipient }, { replace: true }) }
   }
   if (actor.role !== 'teacher') return <Empty title="这项任务需要老师身份" />
 
   return <div className="stack operations-page">
     <BackLink fallbackTo={detailId ? `/teacher/tasks/${tab}` : '/space'} fallbackLabel={detailId ? `返回${teacherStages.find(item => item.key === tab)?.label}列表` : '返回收发任务'} />
     <PageHeader eyebrow="老师收发任务" title={detail ? detail.title : teacherStages.find(item => item.key === tab)?.label ?? '收发任务'} description={detail ? `${nameOf(state, detail.authorId)}写给${nameOf(state, recipientForLetter(state, detail))}。请先核对，再记录这一站。` : teacherStages.find(item => item.key === tab)?.description ?? ''} />
-    {searchParams.get('result') === 'print' && <WorkflowOutcome title={`已记录 ${searchParams.get('count') || '1'} 封信打印`} status="这些信件现在处于待交付状态；打印不等于已经交到孩子手里。" next="老师在实际交付后确认；送达时间才会启动孩子的回应期限。" to={`/teacher/tasks/deliver${searchParams.get('last') ? `?letter=${encodeURIComponent(searchParams.get('last')!)}` : ''}`} actionLabel="去待交付" />}
-    {searchParams.get('result') === 'deliver' && <WorkflowOutcome title={`已确认 ${searchParams.get('count') || '1'} 封信实际交付`} status="送达记录已保存，孩子可以阅读并准备回应。" next={mode === 'demo' ? '小朋友演示身份接下来可以阅读并回应。' : '下一位由小朋友成人测试账号登录，检查送达后的信件。'} to={roleEntryPath('child', mode)} actionLabel={roleEntryAction('child', mode)} />}
-    {searchParams.get('result') === 'deliver' && searchParams.get('last') && <p className="workflow-next-owner">老师之后需要协助回信时：<Link className="text-button" to={`/teacher/tasks/reply?letter=${encodeURIComponent(searchParams.get('last')!)}`}>查看待回传<ArrowRight size={16} aria-hidden="true" /></Link></p>}
+    {searchParams.get('result') === 'print' && <WorkflowOutcome title={`已记录 ${searchParams.get('count') || '1'} 封信打印`} status="这些信件现在处于待交付状态；打印不等于已经交到收件人手里。" next="老师在实际交付后确认；送达时间才会启动收件人的回应期限。" to={`/teacher/tasks/deliver${searchParams.get('last') ? `?letter=${encodeURIComponent(searchParams.get('last')!)}` : ''}`} actionLabel="去待交付" />}
+    {searchParams.get('result') === 'deliver' && <WorkflowOutcome title={`已确认 ${searchParams.get('count') || '1'} 封信实际交付`} status={deliveryStatus} next={deliveryNext} to={resultRecipient === 'mixed' ? undefined : roleEntryPath(resultRecipient, mode)} actionLabel={resultRecipient === 'mixed' ? undefined : roleEntryAction(resultRecipient, mode)} />}
+    {searchParams.get('result') === 'deliver' && resultRecipient === 'child' && searchParams.get('last') && <p className="workflow-next-owner">老师之后需要协助回信时：<Link className="text-button" to={`/teacher/tasks/reply?letter=${encodeURIComponent(searchParams.get('last')!)}`}>查看待回传<ArrowRight size={16} aria-hidden="true" /></Link></p>}
     {searchParams.get('result') === 'reply-submitted' && <WorkflowOutcome title="孩子核对后的回信已提交审核" status="回信等待运营审核，通过前志愿者看不到正文。" next={mode === 'demo' ? '运营演示身份检查这封回信。' : '下一位由运营人员成人测试账号登录并审核。'} to={roleEntryPath('operator', mode)} actionLabel={roleEntryAction('operator', mode)} />}
     {completedLetter && tab === 'print' && completedDelivery?.printedAt && <Notice>这封信已记录打印。下一步请在实际交给收件人后确认交付。<Link className="text-button" to={`/teacher/tasks/deliver?letter=${encodeURIComponent(completedLetter.id)}`}>去待交付<ArrowRight size={16} aria-hidden="true" /></Link></Notice>}
-    {completedLetter && tab === 'deliver' && completedDelivery?.deliveredAt && <Notice>已确认实际交付。收件人现在可以阅读或准备回信；孩子的纸质回信可在待回传中协助提交审核。<Link className="text-button" to="/teacher/tasks/reply">查看待回传<ArrowRight size={16} aria-hidden="true" /></Link></Notice>}
+    {completedLetter && tab === 'deliver' && completedDelivery?.deliveredAt && <Notice>已确认实际交付。收件人现在可以阅读或准备回信。{state.people.find(person => person.id === recipientForLetter(state, completedLetter))?.role === 'child' && <>孩子的纸质回信可在待回传中协助提交审核。<Link className="text-button" to="/teacher/tasks/reply">查看待回传<ArrowRight size={16} aria-hidden="true" /></Link></>}</Notice>}
     {completedLetter && tab === 'reply' && completedTask?.status === 'review' && <Notice>回信正在等待运营审核，通过后才会安排投递。<Link className="text-button" to="/teacher/history">查看处理记录<ArrowRight size={16} aria-hidden="true" /></Link></Notice>}
     {error && <Notice tone="error">{error}</Notice>}
     <div className="teacher-stage-body">
@@ -214,7 +220,7 @@ function TeacherStageWorkspace({ state, actor, notify, setDirty, registerSaveDra
           <p>{tab === 'print' ? '请先预览 A4 信纸，核对打印结果。' : '请在实际交给收件人后确认。'}</p>
           {tab === 'print' && <button className="btn secondary" type="button" disabled={!selectedIds.length || busy} onClick={() => void openPrint()}><Printer size={17} aria-hidden="true" />打开打印预览</button>}
           {printError && <p className="field-error" role="alert">{printError}</p>}
-          <label className="checkbox-row"><input type="checkbox" checked={confirmed} disabled={!selectedIds.length || (tab === 'print' && !printOpened)} onChange={event => setConfirmed(event.target.checked)} />{tab === 'print' ? '我已核对这些信件的打印结果' : '我确认已把这些信件交给对应孩子'}</label>
+          <label className="checkbox-row"><input type="checkbox" checked={confirmed} disabled={!selectedIds.length || (tab === 'print' && !printOpened)} onChange={event => setConfirmed(event.target.checked)} />{tab === 'print' ? '我已核对这些信件的打印结果' : '我确认已把这些信件交给对应收件人'}</label>
           <button className="btn" type="button" disabled={busy || !selectedIds.length || !confirmed || (tab === 'print' && !printOpened)} onClick={() => void recordBatch(tab)}>{busy ? '正在记录…' : tab === 'print' ? '记录已打印' : '确认实际交付'}</button>
           <p className="muted small-text">{tab === 'print' ? '打开打印窗口不会自动记为打印完成。已打印也不代表已交付。' : '请在真实交付后记录。交付日期将作为回信期限的起点。'}</p>
         </section>}

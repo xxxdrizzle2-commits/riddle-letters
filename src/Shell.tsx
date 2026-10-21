@@ -38,8 +38,16 @@ const roleFromPath = (pathname: string): Role | undefined => {
 }
 const isWorkPath = (pathname: string) => /^\/(space|correspondence|write|letters|teacher|operator|account|help)(\/|$)/.test(pathname)
 
-const router = createHashRouter([{ path: '*', element: <Shell/> }])
+const router = createHashRouter([{ path: '*', element: <Shell/>, errorElement: <RouteFailure/> }])
 export default function App() { return <RouterProvider router={router} /> }
+
+function RouteFailure() {
+  return <main className="container public-page" tabIndex={-1}>
+    <div className="panel stack"><h1>页面暂时没能打开</h1><p>可能是网站刚刚更新，或者网络连接中断了。重新载入后会回到当前网址。</p>
+      <button className="btn" type="button" onClick={() => { sessionStorage.removeItem('riddle-chunk-reload-at'); window.location.reload() }}>重新载入页面</button>
+    </div>
+  </main>
+}
 
 function Shell() {
   const runtime = useSyncExternalStore(subscribeRuntime, getRuntime)
@@ -48,7 +56,12 @@ function Shell() {
   const navigate = useNavigate()
   const [actorId, setActorId] = useState(() => localStorage.getItem('riddle-demo-actor') || 'c1')
   const [toast, setToast] = useState('')
-  const [dirty, setDirty] = useState(false)
+  const [dirty, setDirtyState] = useState(false)
+  const dirtyRef = useRef(false)
+  const setDirty = useCallback((value: boolean) => {
+    dirtyRef.current = value
+    setDirtyState(value)
+  }, [])
   const [manualGuard, setManualGuard] = useState(false)
   const [boot, setBoot] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -57,7 +70,9 @@ function Shell() {
   const saveDraftRef = useRef<null | (() => Promise<boolean>)>(null)
   const pendingAction = useRef<null | (() => void | Promise<void>)>(null)
   const previousLocation = useRef(location)
-  const blocker = useBlocker(dirty)
+  // A successful submit clears the guard synchronously before navigating. React state
+  // may still contain the previous edit flag until the next render.
+  const blocker = useBlocker(() => dirtyRef.current)
   const demo = runtime.mode === 'demo'
   const actor = demo ? state?.people.find(person => person.id === actorId) || state?.people.find(person => person.id === 'c1') : runtime.profile
   const workPath = isWorkPath(location.pathname)
