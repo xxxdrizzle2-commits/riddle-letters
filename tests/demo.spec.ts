@@ -207,7 +207,7 @@ test('假期暂停后顺延七天，暂停时仍可阅读和写草稿', async ({
   await as(page, 'child', 'c1')
   await openHistoryLetter(page, originalTitle)
   await expect(page.getByRole('heading', { name: originalTitle, exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: '给 TA 回信', exact: false })).toBeVisible()
+  await expect(page.locator('#letter-reply-top')).toBeVisible()
   await as(page, 'operator', 'op1')
   await advanceWeek(page)
   await page.getByRole('link', { name: '结对', exact: true }).click()
@@ -215,7 +215,7 @@ test('假期暂停后顺延七天，暂停时仍可阅读和写草稿', async ({
   await as(page, 'child', 'c1')
   await openHistoryLetter(page, originalTitle)
   await expect(page.getByText(/约定 11月7日 前回应/)).toBeVisible()
-  await expect(page.getByRole('link', { name: '给 TA 回信', exact: false })).toBeVisible()
+  await expect(page.locator('#letter-reply-top')).toBeVisible()
 })
 
 test('演示日期驱动唯一逾期跟进，处理结果可回查', async ({ page }) => {

@@ -240,7 +240,7 @@ function Shell() {
     <dialog ref={leaveDialog} className="confirm-dialog navigation-guard-dialog" aria-labelledby="leave-title" onCancel={event => { event.preventDefault(); stayOnPage() }}>
       <div className="dialog-content stack">
         <h2 id="leave-title">这封信还没有保存</h2>
-        <p className="muted">继续写可以留在当前页面；保存后离开会把草稿留在此浏览器；放弃修改会丢掉这次尚未保存的内容。</p>
+        <p className="muted">继续写可以留在当前页面；保存后离开会把草稿留在{demo ? '此浏览器' : '当前试测账号'}；放弃修改会丢掉这次尚未保存的内容。</p>
         <div className="toolbar navigation-guard-actions">
           <button type="button" className="btn secondary" onClick={stayOnPage}>继续写</button>
           <button type="button" className="btn secondary" disabled={!saveDraftRef.current} onClick={() => void saveAndLeave()}>保存后离开</button>

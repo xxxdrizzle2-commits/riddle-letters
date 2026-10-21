@@ -1,6 +1,6 @@
 import type { AppState, Command, Person } from '../types'
 
-/** Set only on the protected V3 Preview build; production remains the local V2 demo. */
+/** Set only on the V3 adult-trial build; the V2 demo uses browser-local data. */
 export const cloudConfigured = import.meta.env.VITE_V3_PREVIEW === 'true'
 
 type Snapshot = { state: AppState; profile: Person; revision: number; account: { status: string; permissions?: string[]; application?: unknown } }
@@ -14,7 +14,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function unavailable(): never {
-  throw new Error('账号和云端数据仅在受保护的 V3 试测登录 Preview 中启用。当前公开版继续使用本地合成数据。')
+  throw new Error('账号和云端数据仅在 V3 成人试测站启用。V2 演示站继续使用本地合成数据。')
 }
 
 export async function getCloudSession(): Promise<boolean> {

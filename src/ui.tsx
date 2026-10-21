@@ -48,7 +48,13 @@ export function useAction(notify: (message: string) => void) {
     if (lock.current) return false
     lock.current = true; setBusy(true); setError('')
     try { await task(); if (success) notify(success); return true }
-    catch (e) { setError(e instanceof Error ? e.message : '暂时没能保存，请保留内容后再试一次。'); return false }
+    catch (e) {
+      const message = e instanceof Error ? e.message : ''
+      setError(/failed to fetch|networkerror|load failed/i.test(message)
+        ? '网络连接似乎中断了，操作还没完成。请检查网络后重试。'
+        : message || '暂时没能保存，请保留内容后再试一次。')
+      return false
+    }
     finally { lock.current = false; setBusy(false) }
   }
   return { busy, error, run }
