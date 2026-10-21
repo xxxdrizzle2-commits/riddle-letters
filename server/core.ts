@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { normalizeState, reduceCommand, refreshState, scopeState, canReadLetter } from '../src/domain'
+import { DomainError, normalizeState, reduceCommand, refreshState, scopeState, canReadLetter } from '../src/domain'
 import type { AppState, Command, Person, Role } from '../src/types'
 
 export class ServiceError extends Error { constructor(public code: string, message: string) { super(message) } }
@@ -100,6 +100,7 @@ export async function executeCommand(repository: Repository, identity: Identity,
     requireValue(!('file' in input.command) && !('actorId' in input.command), '请通过安全附件接口上传图片')
     requireValue(JSON.stringify(input.command).length < 30000, '内容过长，请缩短后再试')
     if (input.command.type === 'save-letter') { text(input.command.body, '正文', 12000, true); text(input.command.title ?? '', '标题', 120, true) }
+    if (['match', 'pause-pair', 'resume-pair', 'end-pair', 'extend-task'].includes(input.command.type)) operator(account)
     if (input.command.type === 'review-letter') operator(account, 'moderate')
     if (['resolve-followup', 'assign-followup', 'reopen-followup'].includes(input.command.type)) {
       const item = store.state.followups.find(item => item.id === (input.command as { id: string }).id)
@@ -111,7 +112,13 @@ export async function executeCommand(repository: Repository, identity: Identity,
     store.state.clock = now
     throttle(store, identity.uid, now)
     const previousState = store.state
-    const nextState = reduceCommand(previousState, identity.uid, input.command, { formal: true })
+    let nextState: AppState
+    try {
+      nextState = reduceCommand(previousState, identity.uid, input.command, { formal: true })
+    } catch (error) {
+      if (error instanceof DomainError) throw new ServiceError(error.code, error.message)
+      throw error
+    }
     const id = resultId(input.command, previousState, nextState)
     store.state = nextState; store.state.clock = now; store.revision++
     store.receipts[key] = { hash, resultId: id, at: now }
@@ -229,6 +236,7 @@ export function authorizeAttachment(store: Store, identity: Identity, id: string
   const account = getAccount(store, identity, true); const attachment = store.state.attachments.find(item => item.id === id)
   syncPermissions(store)
   requireValue(attachment, '图片不存在', 'NOT_FOUND')
+  requireValue(!attachment.deletingAt, '图片正在清理，请刷新后重试', 'NOT_FOUND')
   const ownerId = (attachment as typeof attachment & { ownerId?: string }).ownerId
   const person = store.state.people.find(item => item.id === account.uid)!
   const current = store.state.letters.find(item => item.attachmentId === id)

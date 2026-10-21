@@ -11,5 +11,17 @@
       "database_id": "1b50f812-b419-4b49-b24f-aab9f309f73d",
       "migrations_dir": "migrations"
     }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      "bucket_name": "riddle-letters-v3-preview-media"
+    }
+  ],
+  "services": [
+    {
+      "binding": "IMAGE_TRANSFORMER",
+      "service": "riddle-letters-v3-image-transformer"
+    }
   ]
 }

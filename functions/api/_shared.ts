@@ -34,10 +34,12 @@ export function errorResponse(error: unknown) {
   const known = error instanceof ServiceError ? error : undefined
   const status = known?.code === 'UNAUTHENTICATED' ? 401
     : known?.code === 'FORBIDDEN' || known?.code === 'ACCOUNT_REQUIRED' || known?.code === 'ACCOUNT_DISABLED' ? 403
-    : known?.code === 'CONFLICT' ? 409
-    : known?.code === 'INVALID_INPUT' ? 400
+    : ['CONFLICT', 'ATTACHMENT_IN_USE'].includes(known?.code || '') ? 409
+    : known?.code === 'NOT_FOUND' ? 404
+    : ['INVALID_INPUT', 'INVALID_IMAGE', 'INVALID_ACTION'].includes(known?.code || '') ? 400
+    : known?.code === 'UPLOAD_QUOTA' || known?.code === 'IMAGE_TOO_LARGE' ? 413
     : known?.code === 'RATE_LIMITED' ? 429
-    : known?.code === 'V3_PREVIEW_DISABLED' || known?.code === 'SCHEMA_NOT_READY' ? 503
+    : known?.code === 'V3_PREVIEW_DISABLED' || known?.code === 'SCHEMA_NOT_READY' || known?.code === 'MEDIA_NOT_CONFIGURED' || known?.code === 'STORAGE_FAILED' ? 503
     : 500
   const message = known?.message || '请求暂时没有完成，请保留内容后重试'
   return jsonResponse({ error: { code: known?.code || 'INTERNAL_ERROR', message } }, status)

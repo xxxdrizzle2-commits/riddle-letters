@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["src", "functions/**/*.ts", "server/**/*.ts", "vite.config.ts"],
-  "exclude": ["src/**/*.test.ts", "tests"]
+  "include": ["src", "functions/**/*.ts", "server/**/*.ts", "media-worker/**/*.ts", "vite.config.ts"],
+  "exclude": ["src/**/*.test.ts", "server/**/*.test.ts", "media-worker/**/*.test.ts", "tests"]
 }

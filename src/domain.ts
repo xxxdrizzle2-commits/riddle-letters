@@ -56,8 +56,15 @@ export function createSeedState(): AppState {
   }
 }
 
-const fail = (message: string): never => { throw new Error(message) }
-function ensure(condition: unknown, message: string): asserts condition { if (!condition) fail(message) }
+export type DomainErrorCode = 'FORBIDDEN' | 'INVALID_ACTION'
+export class DomainError extends Error {
+  constructor(message: string, public readonly code: DomainErrorCode = 'INVALID_ACTION') {
+    super(message)
+    this.name = 'DomainError'
+  }
+}
+const fail = (message: string, code: DomainErrorCode = 'INVALID_ACTION'): never => { throw new DomainError(message, code) }
+function ensure(condition: unknown, message: string, code: DomainErrorCode = 'INVALID_ACTION'): asserts condition { if (!condition) fail(message, code) }
 const uid = (prefix: string) => `${prefix}-${crypto.randomUUID()}`
 const addDays = (iso: string, days: number) => new Date(Date.parse(iso) + days * DAY).toISOString()
 export const hasPermission = (actor: Person, permission: NonNullable<Person['permissions']>[number]) => actor.role === 'operator' && (!actor.permissions || actor.permissions.includes(permission))
@@ -229,10 +236,10 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
   const pairById = (id: string) => state.pairs.find(p => p.id === id) ?? fail('这组陪伴关系不存在。')
   const letterById = (id: string) => state.letters.find(l => l.id === id) ?? fail('这封信不存在。')
   const active = (id: string) => { const pair = pairById(id); ensure(pair.status === 'active', pair.status === 'ended' ? '这组陪伴已经结束。' : '这组陪伴正在暂停，恢复后再继续操作。'); return pair }
-  const operator = (permission: NonNullable<Person['permissions']>[number] = 'administration') => ensure(hasPermission(actor, permission), '这项操作需要获得相应权限的运营人员处理。')
+  const operator = (permission: NonNullable<Person['permissions']>[number] = 'administration') => ensure(hasPermission(actor, permission), '这项操作需要获得相应权限的运营人员处理。', 'FORBIDDEN')
   const editable = (letter: Letter) => {
     const pair = state.pairs.find(p => p.id === letter.pairId)
-    ensure(actor.id === letter.authorId || (actor.role === 'teacher' && pair?.teacherId === actor.id && letter.createdBy === actor.id), '你只能修改自己写的信或自己代录的回信。')
+    ensure(actor.id === letter.authorId || (actor.role === 'teacher' && pair?.teacherId === actor.id && letter.createdBy === actor.id), '你只能修改自己写的信或自己代录的回信。', 'FORBIDDEN')
     ensure(!pair || pair.status !== 'ended', '这组陪伴已经结束。')
     ensure(letter.moderation === 'draft' || letter.moderation === 'returned', '这封信已提交，请等待审核结果。')
   }
@@ -258,13 +265,13 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       ensure(command.id === undefined || (command.id.trim().length > 0 && command.id.length <= 120), '这封信的标识无效。')
       ensure(command.body.length <= 6000, '信件正文请控制在 6000 字以内。')
       ensure(!command.riddleId || riddles.some(r => r.id === command.riddleId), '这道谜语不存在，请重新选择。')
-      ensure(actor.role === 'child' || actor.role === 'volunteer' || (actor.role === 'teacher' && pair?.teacherId === actor.id), '你没有写这封信的权限。')
+      ensure(actor.role === 'child' || actor.role === 'volunteer' || (actor.role === 'teacher' && pair?.teacherId === actor.id), '你没有写这封信的权限。', 'FORBIDDEN')
       const authorId = actor.role === 'teacher' ? pair!.childId : actor.id
-      ensure(!command.authorId || command.authorId === authorId, '不能替换写信人。')
-      ensure(!pair || authorId === pair.childId || authorId === pair.volunteerId, '请选择自己的书信伙伴。')
+      ensure(!command.authorId || command.authorId === authorId, '不能替换写信人。', 'FORBIDDEN')
+      ensure(!pair || authorId === pair.childId || authorId === pair.volunteerId, '请选择自己的书信伙伴。', 'FORBIDDEN')
       ensure(pair || !state.pairs.some(p => p.status !== 'ended' && (p.childId === actor.id || p.volunteerId === actor.id)), '请将草稿写给当前的书信伙伴。')
       const recipientId = pair ? authorId === pair.childId ? pair.volunteerId : pair.childId : undefined
-      ensure(!command.recipientId || command.recipientId === recipientId, '不能向未结对的人寄信。')
+      ensure(!command.recipientId || command.recipientId === recipientId, '不能向未结对的人寄信。', 'FORBIDDEN')
       if (command.replyTo) { const original = letterById(command.replyTo); ensure(original.pairId === pair?.id && recipientForLetter(state, original) === authorId && original.moderation === 'approved' && state.deliveries.some(d => d.letterId === original.id && d.deliveredAt), '原信确认送达后，才可以写回信。') }
       let letter = command.id ? state.letters.find(l => l.id === command.id) : state.letters.find(l => l.pairId === command.pairId && l.authorId === authorId && l.createdBy === actor.id && l.replyTo === command.replyTo && (l.moderation === 'draft' || l.moderation === 'returned') && l.title === command.title.trim() && l.body === command.body && l.riddleId === command.riddleId)
       if (letter) {
@@ -284,7 +291,7 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       if (command.removeAttachment) letter.attachmentId = undefined
       if (command.attachmentId) {
         const attachment = state.attachments.find(a => a.id === command.attachmentId)
-        ensure(attachment && attachment.ownerId === actor.id && (!attachment.pairId || attachment.pairId === command.pairId), '附件不属于当前账号或书信伙伴。')
+        ensure(attachment && !attachment.deletingAt && attachment.ownerId === actor.id && (!attachment.pairId || attachment.pairId === command.pairId), '附件不属于当前账号或书信伙伴，或正在清理。', 'FORBIDDEN')
         letter.attachmentId = attachment.id; attachment.pairId = command.pairId
       }
       if (command.file) {
@@ -298,7 +305,7 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
     }
     case 'submit-letter': {
       const letter = letterById(command.id)
-      ensure(actor.id === letter.authorId || actor.id === letter.createdBy, '你不能提交这封信。')
+      ensure(actor.id === letter.authorId || actor.id === letter.createdBy, '你不能提交这封信。', 'FORBIDDEN')
       active(letter.pairId)
       if (letter.moderation === 'pending' || letter.moderation === 'approved') break
       editable(letter)
@@ -337,10 +344,11 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
     }
     case 'print':
     case 'deliver': {
-      ensure(actor.role === 'teacher', '请使用负责收发的老师账号。')
+      ensure(actor.role === 'teacher', '请使用负责收发的老师账号。', 'FORBIDDEN')
       for (const id of new Set(command.ids)) {
         const letter = letterById(id), pair = active(letter.pairId)
-        ensure(pair.teacherId === actor.id && pair.channel === 'paper' && letter.moderation === 'approved', '只能处理自己负责的、已审核通过的纸质信件。')
+        ensure(pair.teacherId === actor.id && pair.channel === 'paper', '只能处理自己负责的纸质信件。', 'FORBIDDEN')
+        ensure(letter.moderation === 'approved', '只有审核通过的纸质信件可以打印或交付。')
         let delivery = state.deliveries.find(d => d.letterId === id)
         if (!delivery) { delivery = { letterId: id }; state.deliveries.push(delivery) }
         if (command.type === 'print') delivery.printedAt ??= state.clock
@@ -350,7 +358,7 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
     }
     case 'read': {
       const letter = letterById(command.id)
-      ensure(canReadLetter(state, actor, letter), '这封信暂时不在你的可读范围内。')
+      ensure(canReadLetter(state, actor, letter), '这封信暂时不在你的可读范围内。', 'FORBIDDEN')
       if (recipientForLetter(state, letter) === actor.id) { const delivery = state.deliveries.find(d => d.letterId === letter.id); ensure(letter.moderation === 'approved' && delivery?.deliveredAt, '信件尚未送达。'); delivery.readAt ??= state.clock }
       break
     }
@@ -389,10 +397,10 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       break
     }
     case 'help': {
-      ensure(actor.role !== 'operator', '运营人员请在跟进事项中记录处理情况。')
+      ensure(actor.role !== 'operator', '运营人员请在跟进事项中记录处理情况。', 'FORBIDDEN')
       ensure(command.body.trim().length >= 2 && command.body.length <= 2000, '请写下 2—2000 字的想法。')
       const pair = command.pairId ? pairById(command.pairId) : state.pairs.find(p => p.status !== 'ended' && (p.childId === actor.id || p.volunteerId === actor.id))
-      ensure(!pair || [pair.childId, pair.volunteerId, pair.teacherId].includes(actor.id), '请选择自己的书信伙伴。')
+      ensure(!pair || [pair.childId, pair.volunteerId, pair.teacherId].includes(actor.id), '请选择自己的书信伙伴。', 'FORBIDDEN')
       state.followups.push({ id: uid('help'), pairId: pair?.id, requesterId: actor.id, ownerId: state.people.find(p => hasPermission(p, 'safeguarding'))?.id, kind: 'help', status: 'open', note: `${actor.nickname}：${command.body.trim()}`, createdAt: state.clock, updatedAt: state.clock, history: [] })
       break
     }

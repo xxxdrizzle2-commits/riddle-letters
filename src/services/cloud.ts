@@ -50,5 +50,32 @@ export async function changePassword(_input: { oldPassword: string; newPassword:
 }
 export async function activateInvite(_input: { token: string; username: string; password: string; nickname?: string }): Promise<{ username: string }> { return unavailable() }
 export async function downloadAttachment(_id: string): Promise<Blob> {
-  throw new Error('V3 试测登录暂不提供云端图片附件；图片仍只在本地 Demo 使用。')
+  if (!cloudConfigured) unavailable()
+  const response = await fetch(`/api/attachments/${encodeURIComponent(_id)}?variant=letter`, { credentials: 'include', cache: 'no-store' })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({})) as ApiError
+    throw new Error(payload.error?.message || `图片暂时打不开（${response.status}）`)
+  }
+  return response.blob()
+}
+
+export async function uploadCloudAttachment(pairId: string, file: File): Promise<{ id: string; name: string; type: string }> {
+  if (!cloudConfigured) unavailable()
+  const response = await fetch('/api/attachments', {
+    method: 'POST', credentials: 'include', cache: 'no-store',
+    headers: { 'Content-Type': file.type, 'X-Pair-Id': pairId, 'X-File-Name': encodeURIComponent(file.name) },
+    body: file,
+  })
+  const payload = await response.json().catch(() => ({})) as { id?: string; name?: string; type?: string } & ApiError
+  if (!response.ok || !payload.id) throw new Error(payload.error?.message || `图片没有保存成功（${response.status}）`)
+  return { id: payload.id, name: payload.name || file.name, type: payload.type || 'image/webp' }
+}
+
+export async function removeCloudAttachment(id: string): Promise<void> {
+  if (!cloudConfigured) return
+  const response = await fetch(`/api/attachments/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'include', cache: 'no-store' })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({})) as ApiError
+    throw new Error(payload.error?.message || `图片清理没有完成（${response.status}）`)
+  }
 }

@@ -4,6 +4,7 @@ import { useSyncExternalStore } from 'react'
 import type { AppState, Command } from './types'
 import { createSeedState, normalizeState, reduceCommand, validateAttachment } from './domain'
 import { executeRemote, getRuntime, subscribeRuntime } from './runtime'
+import { removeCloudAttachment, uploadCloudAttachment } from './services/cloud'
 export { canReadLetter, createSeedState, formatDate, groupedResponseTasks, hasPermission, isOverdue, normalizeState, recipientForLetter, reduceCommand, riddles, scopeState, validateAttachment, visibleLetters } from './domain'
 
 const db = new Dexie('riddle-letter-demo-v1') as Dexie & { snapshots: Table<AppState, string> }
@@ -45,7 +46,27 @@ export async function sanitizeAttachment(file: File): Promise<File> {
 export async function dispatch(actorId: string, original: Command): Promise<string> {
   let command = original
   if (command.type === 'save-letter' && command.file) command = { ...command, file: await sanitizeAttachment(command.file) }
-  if (getRuntime().mode === 'cloud') return executeRemote(command)
+  if (getRuntime().mode === 'cloud') {
+    if (command.type !== 'save-letter') return executeRemote(command)
+    let cloudCommand: Extract<Command, { type: 'save-letter' }> = command
+    const oldAttachmentId = getRuntime().state?.letters.find(letter => letter.id === cloudCommand.id)?.attachmentId
+    let uploadedId: string | undefined
+    if (cloudCommand.file) {
+      const uploaded = await uploadCloudAttachment(cloudCommand.pairId, cloudCommand.file)
+      uploadedId = uploaded.id
+      cloudCommand = { ...cloudCommand, file: undefined, attachmentId: uploaded.id, removeAttachment: false }
+    }
+    try {
+      const result = await executeRemote(cloudCommand)
+      if (oldAttachmentId && oldAttachmentId !== uploadedId && (uploadedId || cloudCommand.removeAttachment)) {
+        await removeCloudAttachment(oldAttachmentId).catch(() => undefined)
+      }
+      return result
+    } catch (error) {
+      if (uploadedId) await removeCloudAttachment(uploadedId).catch(() => undefined)
+      throw error
+    }
+  }
   return db.transaction('rw', db.snapshots, async () => {
     const previous = await db.snapshots.get('main')
     if (!previous) throw new Error('演示数据还没有准备好，请稍后重试。')
