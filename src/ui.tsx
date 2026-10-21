@@ -1,10 +1,38 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowRight, Feather, Leaf, Mail, Check, HelpCircle } from 'lucide-react'
+import { useEffect, useRef, useState, type ComponentProps, type MouseEvent, type ReactNode } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router'
+import { ArrowLeft, ArrowRight, Feather, Leaf, Mail, Check, HelpCircle } from 'lucide-react'
 import type { AppState, Letter, Person } from './types'
 import { formatDate, riddles } from './data'
 import { downloadAttachment } from './services/cloud'
 
 export interface PageProps { state: AppState; actor: Person; notify: (message: string) => void; mode?: 'demo' | 'live' }
+
+type ReturnContext = { to: string; label: string; sourcePath: string; sourceKey: string; focusId?: string; historyBack: boolean }
+type ContextLinkProps = Omit<ComponentProps<typeof Link>, 'to' | 'state'> & {
+  to: string; returnLabel: string; returnTo?: string; focusId?: string; historyBack?: boolean; state?: Record<string, unknown>
+}
+
+export function ContextLink({ to, returnLabel, returnTo, focusId, historyBack = true, state, ...props }: ContextLinkProps) {
+  const location = useLocation()
+  const sourcePath = `${location.pathname}${location.search}${location.hash}`
+  const returnContext: ReturnContext = { to: returnTo || sourcePath, label: returnLabel, sourcePath, sourceKey: location.key, focusId, historyBack }
+  return <Link {...props} to={to} state={{ ...state, returnContext }} />
+}
+
+export function BackLink({ fallbackTo, fallbackLabel }: { fallbackTo: string; fallbackLabel: string }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const context = (location.state as { returnContext?: Partial<ReturnContext> } | null)?.returnContext
+  const target = typeof context?.to === 'string' && context.to.startsWith('/') && !context.to.startsWith('//') ? context.to : fallbackTo
+  const label = typeof context?.label === 'string' && context.label.trim() ? context.label : fallbackLabel
+  function goBack(event: MouseEvent<HTMLAnchorElement>) {
+    event.preventDefault()
+    if (context?.focusId && /^[\w-]+$/.test(context.focusId)) sessionStorage.setItem('riddle-return-focus', context.focusId)
+    if (context?.historyBack && context.sourceKey && history.length > 1) navigate(-1)
+    else navigate(target, { replace: true })
+  }
+  return <Link className="back-link" to={target} replace onClick={goBack}><ArrowLeft size={16} aria-hidden="true" />{label}</Link>
+}
 export function PageHeader({ eyebrow, title, description, children }: { eyebrow?: string; title: string; description?: string; children?: ReactNode }) {
   return <header className="page-header"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h1>{title}</h1>{description && <p className="muted">{description}</p>}</div>{children && <div className="toolbar">{children}</div>}</header>
 }

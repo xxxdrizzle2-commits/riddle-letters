@@ -1,26 +1,28 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ArrowLeft, ArrowRight, CheckCircle2, Clock3, Feather, HeartHandshake, Leaf, Mail, Plus, Save, Send, X } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Clock3, Feather, HeartHandshake, Leaf, Mail, Plus, Save, Send, X } from 'lucide-react'
 import { canReadLetter, dispatch, formatDate, isOverdue, riddles, visibleLetters, groupedResponseTasks, recipientForLetter } from '../data'
-import { Avatar, Badge, Empty, LetterBadge, LetterPaper, Notice, PageHeader, useAction, type PageProps } from '../ui'
+import { Avatar, BackLink, Badge, ContextLink, Empty, LetterBadge, LetterPaper, Notice, PageHeader, useAction, type PageProps } from '../ui'
 import type { Letter, Pair } from '../types'
 import './WorkflowV1.css'
 
 const roleHome = (role: string) => ({child: '信箱', volunteer: '陪伴任务', teacher: '收发任务', operator: '待处理'}[role] || '任务页')
+const roleNextPath = (role: string, mode: 'demo' | 'live') => mode === 'demo' ? `/demo/start/${role}` : `/login/${role}`
+const roleNextAction = (role: string, mode: 'demo' | 'live') => mode === 'demo' ? `切换到${({child:'小朋友',volunteer:'志愿者',teacher:'老师',operator:'运营人员'} as Record<string,string>)[role]}演示身份继续` : `请${({child:'小朋友',volunteer:'志愿者',teacher:'老师',operator:'运营人员'} as Record<string,string>)[role]}成人测试者登录继续`
 const activePair = (state: PageProps['state'], actor: PageProps['actor']) => state.pairs.find(p => p.status !== 'ended' && (p.childId === actor.id || p.volunteerId === actor.id))
 
 export function HelpPanel({state, actor, notify, mode = 'demo'}: PageProps) {
-  const [opened, setOpened] = useState(false), [body, setBody] = useState('')
+  const [opened, setOpened] = useState(false), [body, setBody] = useState(''), [submitted, setSubmitted] = useState(false)
   const { run, busy, error } = useAction(notify)
   const pair = activePair(state, actor)
-  return <section className="help-panel"><button type="button" className="help-button" onClick={() => setOpened(!opened)} aria-expanded={opened}><HeartHandshake size={20}/><span>找人帮忙</span><ArrowRight size={16}/></button>{opened && <form className="panel stack" onSubmit={async e => {e.preventDefault(); if (!body.trim()) return; if (await run(() => dispatch(actor.id, {type:'help', pairId: pair?.id, body}), mode === 'demo' ? '演示求助已保存，运营演示身份可以查看。' : '求助已提交，负责运营会在值守时段查看。')) {setBody(''); setOpened(false)}}}><label htmlFor="help-message">有什么想告诉负责运营的人？</label><textarea id="help-message" value={body} onChange={e => setBody(e.target.value)} rows={4} maxLength={2000} required/><p className="muted small">这段话交给有求助处理权限的运营人员，不会自动分享给你的伙伴或老师。{mode === 'demo' ? '当前为本地演示，不会通知真实工作人员。' : '这里并非即时聊天，值守安排请查看“我的”页面。'}需要马上得到帮助时，也请告诉身边信任的大人。</p>{error && <p className="field-error" role="alert">{error}</p>}<button className="btn" disabled={busy || !body.trim()}>{busy ? '正在提交…' : '提交求助'}</button></form>}</section>
+  return <section className="help-panel"><button type="button" className="help-button" onClick={() => setOpened(!opened)} aria-expanded={opened}><HeartHandshake size={20}/><span>找人帮忙</span><ArrowRight size={16}/></button>{submitted && <Notice>{mode === 'demo' ? '求助已保存在此浏览器，当前状态为“等待跟进”。不会通知真实工作人员。' : '求助已提交到试测数据库，当前状态为“等待跟进”。' }下一步由有求助处理权限的运营人员查看。<Link className="text-button" to={roleNextPath('operator', mode)}>{roleNextAction('operator', mode)}<ArrowRight size={15}/></Link></Notice>}{opened && <form className="panel stack" onSubmit={async e => {e.preventDefault(); if (!body.trim()) return; if (await run(() => dispatch(actor.id, {type:'help', pairId: pair?.id, body}), mode === 'demo' ? '演示求助已保存，运营演示身份可以查看。' : '求助已提交，负责运营会在值守时段查看。')) {setBody(''); setOpened(false); setSubmitted(true)}}}><label htmlFor="help-message">有什么想告诉负责运营的人？</label><textarea id="help-message" value={body} onChange={e => setBody(e.target.value)} rows={4} maxLength={2000} required/><p className="muted small">这段话交给有求助处理权限的运营人员，不会自动分享给你的伙伴或老师。{mode === 'demo' ? '当前为本地演示，不会通知真实工作人员。' : '这里并非即时聊天，值守安排请查看“我的”页面。'}需要马上得到帮助时，也请告诉身边信任的大人。</p>{error && <p className="field-error" role="alert">{error}</p>}<button className="btn" disabled={busy || !body.trim()}>{busy ? '正在提交…' : '提交求助'}</button></form>}</section>
 }
 
 export function ChildPage(props: PageProps) {
-  const {state, actor} = props
+  const {state, actor, mode = 'demo'} = props
   const pair = activePair(state, actor)
   const partner = state.people.find(person => person.id === pair?.volunteerId)
   const letters = visibleLetters(state, actor)
@@ -33,9 +35,9 @@ export function ChildPage(props: PageProps) {
   const write = returned
     ? {title: '这封信，可以接着改一改。', description: '你的原文还在。看看修改建议，再按自己的想法写下去。', label: '修改这封信', to: `/write/${returned.id}`}
     : draft
-      ? {title: '上次写到这里，接着来吧。', description: '草稿保存在这个浏览器里，可以从停下的地方继续。', label: '接着写', to: `/write/${draft.id}`}
+      ? {title: '上次写到这里，接着来吧。', description: mode === 'demo' ? '草稿保存在这个浏览器里，可以从停下的地方继续。' : '草稿保存在试测账号中，可以从停下的地方继续。', label: '接着写', to: `/write/${draft.id}`}
       : !pair
-        ? {title: '先写几句，介绍自己吧。', description: '等结对后再由你确认寄出。现在写下的内容只会保存在这个浏览器里。', label: '写一封信', to: '/write'}
+        ? {title: '先写几句，介绍自己吧。', description: mode === 'demo' ? '等结对后再由你确认寄出。现在写下的内容只会保存在这个浏览器里。' : '等运营完成测试结对后再确认寄出。草稿保存在试测账号中。', label: '写一封信', to: '/write'}
         : {title: '今天，有什么想分享的小事？', description: '一句问好、一件小发现，都可以写给伙伴。', label: '写一封信', to: '/write'}
   return <div className="v2-child-home">
     <PageHeader eyebrow="信箱" title={`欢迎回来，${actor.nickname}。`} description="有话想说可以写信，收到的信也在这里。" />
@@ -44,7 +46,7 @@ export function ChildPage(props: PageProps) {
         <p className="eyebrow">先做这一件事</p>
         <h2>{write.title}</h2>
         <p>{write.description}</p>
-        <Link className="btn" to={write.to}><Feather size={19}/>{write.label}<ArrowRight size={18}/></Link>
+        <ContextLink id="child-start-writing" className="btn" to={write.to} returnLabel="返回信箱" focusId="child-start-writing"><Feather size={19}/>{write.label}<ArrowRight size={18}/></ContextLink>
         {pair?.status === 'paused' && <p className="v2-quiet-note">陪伴暂停中，写下的信可以先存草稿，恢复后再寄出。</p>}
       </div>
       <img src="/images/letter-garden.webp" alt="" aria-hidden="true" />
@@ -52,10 +54,10 @@ export function ChildPage(props: PageProps) {
     {unread && <section className="v2-arrival-card" aria-label="未读来信">
       <span className="v2-arrival-icon"><Mail size={25} strokeWidth={1.5}/></span>
       <div><p className="eyebrow">还有一封新来信</p><h2>{unread.title}</h2><p>{state.people.find(person => person.id === unread.authorId)?.nickname || '书信伙伴'}写给你的话，等你有空时慢慢读。</p></div>
-      <Link className="btn secondary" to={`/letters/${unread.id}`}>打开来信<ArrowRight size={16}/></Link>
+      <ContextLink id={`child-letter-${unread.id}`} className="btn secondary" to={`/letters/${unread.id}`} returnLabel="返回信箱" focusId="child-start-writing">打开来信<ArrowRight size={16}/></ContextLink>
     </section>}
     {!unread && pending && <section className="v2-status-card" aria-label="信件进度">
-      <Mail size={19}/><p>你写的《{pending.title}》正在等待运营审核，通过后才会送给伙伴。</p><Link className="text-button" to={`/letters/${pending.id}`}>查看进度<ArrowRight size={16}/></Link>
+      <Mail size={19}/><p>你写的《{pending.title}》正在等待运营审核，通过后才会送给伙伴。</p><ContextLink id={`child-letter-${pending.id}`} className="text-button" to={`/letters/${pending.id}`} returnLabel="返回信箱" focusId={`child-letter-${pending.id}`}>查看进度<ArrowRight size={16}/></ContextLink>
     </section>}
     <Link className="v2-history-link" to="/correspondence"><span><strong>看看我们的信</strong><small>{partner ? `和${partner.nickname}的来信、回信与草稿都在这里。` : '写过的自我介绍会在这里。'}</small></span><ArrowRight size={18}/></Link>
   </div>
@@ -105,16 +107,16 @@ export function VolunteerPage(props: PageProps) {
   const otherTasks = [...otherDrafts, ...otherGroups].filter(task => task.to !== priority.to).slice(0, 3)
   return <div className="v2-volunteer-home">
     <PageHeader eyebrow="陪伴任务" title={`${actor.nickname}，这次先做什么？`} description="先完成眼前这一步，再继续下一封信。">
-      {pair && <Link className="btn secondary" to="/write"><Plus size={17}/>写一封信</Link>}
+      {pair && <ContextLink className="btn secondary" to="/write" returnLabel="返回陪伴任务"><Plus size={17}/>写一封信</ContextLink>}
     </PageHeader>
     <section className="v2-priority-card" aria-label="当前最需要处理的事">
       <p className="eyebrow">现在先做这件事</p>
       <h2>{priority.label}</h2>
       <p>{priority.detail}</p>
-      <Link className="task-action v2-task-primary" to={priority.to}><Feather size={19}/><span><strong>{priority.label}</strong>{priority.sourceTitle && <small>{priority.sourceTitle}</small>}</span><ArrowRight size={17}/></Link>
+      <ContextLink className="task-action v2-task-primary" to={priority.to} returnLabel="返回陪伴任务"><Feather size={19}/><span><strong>{priority.label}</strong>{priority.sourceTitle && <small>{priority.sourceTitle}</small>}</span><ArrowRight size={17}/></ContextLink>
     </section>
     {pair?.status === 'paused' && <Notice>这段陪伴暂停中：{pair.pauseReason}。可以写和保存草稿，恢复后再提交审核。</Notice>}
-    {otherTasks.length > 0 && <section className="v2-secondary-tasks" aria-label="其余待办"><h2 className="section-title">稍后还可以处理</h2>{otherTasks.map((task, index) => <Link className="task-action" key={`${task.to}-${index}`} to={task.to}><Mail size={18}/><span><strong>{task.label}</strong><small>{task.sourceTitle || task.detail}</small></span><ArrowRight size={16}/></Link>)}</section>}
+    {otherTasks.length > 0 && <section className="v2-secondary-tasks" aria-label="其余待办"><h2 className="section-title">稍后还可以处理</h2>{otherTasks.map((task, index) => <ContextLink className="task-action" key={`${task.to}-${index}`} to={task.to} returnLabel="返回陪伴任务"><Mail size={18}/><span><strong>{task.label}</strong><small>{task.sourceTitle || task.detail}</small></span><ArrowRight size={16}/></ContextLink>)}</section>}
     {pair && <section className="v2-partner-summary"><Avatar person={child} large/><div><p className="eyebrow">我的书信伙伴</p><h2>{child?.nickname || '等待遇见'}</h2><p>{pair.channel === 'paper' ? '由老师协助纸质收发' : '通过线上信箱往来'} · {pair.status === 'paused' ? '陪伴暂停中' : '陪伴进行中'}</p></div></section>}
     <Link className="v2-history-link" to="/correspondence"><span><strong>查看书信往来</strong><small>来信、已写的信和草稿都在这里。</small></span><ArrowRight size={18}/></Link>
   </div>
@@ -139,11 +141,12 @@ export function CorrespondencePage(props: PageProps) {
 export function LetterRow({state, actor, letter}: PageProps & {letter: Letter}) {
   const editable = letter.authorId === actor.id && (!letter.pairId || state.pairs.find(pair => pair.id === letter.pairId)?.status !== 'ended') && ['draft','returned'].includes(letter.moderation)
   const author = state.people.find(p => p.id === letter.authorId)
-  return <Link className="letter-row" to={editable ? `/write/${letter.id}` : `/letters/${letter.id}`}><span className="letter-row-icon"><Mail size={21} strokeWidth={1.5}/></span><div className="letter-row-text"><h3>{letter.title || '一封还在慢慢写的信'}</h3><span className="muted small">{author?.nickname} · {formatDate(letter.updatedAt)}{letter.replyTo ? ' · 回信' : ''}</span></div><LetterBadge state={state} letter={letter}/><ArrowRight size={17} className="row-arrow"/></Link>
+  const id = `correspondence-letter-${letter.id}`
+  return <ContextLink id={id} className="letter-row" to={editable ? `/write/${letter.id}` : `/letters/${letter.id}`} returnLabel="返回书信往来" focusId={id}><span className="letter-row-icon"><Mail size={21} strokeWidth={1.5}/></span><div className="letter-row-text"><h3>{letter.title || '一封还在慢慢写的信'}</h3><span className="muted small">{author?.nickname} · {formatDate(letter.updatedAt)}{letter.replyTo ? ' · 回信' : ''}</span></div><LetterBadge state={state} letter={letter}/><ArrowRight size={17} className="row-arrow"/></ContextLink>
 }
 
 export function LetterDetail(props: PageProps) {
-  const {state, actor, notify} = props
+  const {state, actor, notify, mode = 'demo'} = props
   const {id} = useParams()
   const [query] = useSearchParams()
   const {run, error, busy} = useAction(notify)
@@ -155,8 +158,8 @@ export function LetterDetail(props: PageProps) {
       void run(() => dispatch(actor.id, {type: 'read', id: letter.id}))
     }
   }, [id, readable, actor.id, delivery?.readAt])
-  const back = ['child', 'volunteer'].includes(actor.role) ? '/correspondence' : '/space'
-  if (!letter || !readable) return <Empty title="这封信暂时不能打开" description="可能还在等待审核，或当前身份没有阅读权限。"><Link to={back} className="btn secondary">返回{back === '/space' ? roleHome(actor.role) : '书信往来'}</Link></Empty>
+  const fallback = actor.role === 'volunteer' ? '/space' : '/space'
+  if (!letter || !readable) return <div className="stack"><BackLink fallbackTo={fallback} fallbackLabel={`返回${roleHome(actor.role)}`} /><Empty title="这封信暂时不能打开" description="可能还在等待审核，或当前身份没有阅读权限。"><Link to={fallback} className="btn secondary">回到{roleHome(actor.role)}</Link></Empty></div>
   const pair = state.pairs.find(item => item.id === letter.pairId)
   const task = state.tasks.find(item => item.letterId === id)
   const own = letter.authorId === actor.id
@@ -174,14 +177,14 @@ export function LetterDetail(props: PageProps) {
     : pair?.channel === 'paper' ? '信件已通过审核，等待老师打印。' : '信件已通过审核，等待送达。'
   return <div className="v2-letter-detail">
     <div className="toolbar between reading-top">
-      <Link className="back-link" to={back}><ArrowLeft size={16}/>返回{back === '/space' ? roleHome(actor.role) : '书信往来'}</Link>
-      {canReply && !sentReply && <Link className="btn" to={reply ? `/write/${reply.id}` : `/write?pair=${pair!.id}&replyTo=${id}`}><Feather size={18}/>{reply ? '接着写回信' : '给 TA 回信'}</Link>}
+      <BackLink fallbackTo={fallback} fallbackLabel={`返回${roleHome(actor.role)}`} />
+      {canReply && !sentReply && <ContextLink id="letter-reply-top" className="btn" to={reply ? `/write/${reply.id}` : `/write?pair=${pair!.id}&replyTo=${id}`} returnLabel="返回来信" focusId="letter-reply-top"><Feather size={18}/>{reply ? '接着写回信' : '给 TA 回信'}</ContextLink>}
     </div>
-    {submitted && <section className="v2-submission-confirmation" role="status"><CheckCircle2 size={24}/><div><h2>已提交审核</h2><p>这封信已经交给运营演示身份审核。通过后才会送达伙伴；你可以回到任务页，稍后再查看进度。</p><Link className="text-button" to="/space">回到{roleHome(actor.role)}<ArrowRight size={16}/></Link></div></section>}
+    {submitted && <section className="v2-submission-confirmation" role="status"><CheckCircle2 size={24}/><div><h2>已提交审核</h2><p>当前状态：等待运营审核。下一步由运营审核；通过后才会送达伙伴。</p><div className="toolbar"><Link className="text-button" to="/space">回到{roleHome(actor.role)}<ArrowRight size={16}/></Link><Link className="text-button" to={roleNextPath('operator', mode)}>{roleNextAction('operator', mode)}<ArrowRight size={16}/></Link></div></div></section>}
     {letter.moderation === 'returned' && <Notice tone="warning">修改建议：{letter.moderationNote}{own && pair?.status !== 'ended' && <Link className="text-button" to={`/write/${id}`}>继续修改<ArrowRight size={15}/></Link>}</Notice>}
     {letter.moderation === 'pending' && !submitted && <Notice>这封信正在等待审核。通过后才会送往下一站。</Notice>}
     <div className="reading-grid">
-      <div className="v2-paper-column"><LetterPaper state={state} letter={letter}/>{canReply && !sentReply && <Link className="btn v2-reply-after-paper" to={reply ? `/write/${reply.id}` : `/write?pair=${pair!.id}&replyTo=${id}`}><Feather size={18}/>{reply ? '接着写回信' : '给 TA 回信'}</Link>}{sentReply && <Notice>你写的回应{sentReply.moderation === 'pending' ? '正在等待运营审核' : '已经通过审核'}，这封来信不会重复催办。</Notice>}</div>
+      <div className="v2-paper-column"><LetterPaper state={state} letter={letter}/>{canReply && !sentReply && <ContextLink id="letter-reply-after-paper" className="btn v2-reply-after-paper" to={reply ? `/write/${reply.id}` : `/write?pair=${pair!.id}&replyTo=${id}`} returnLabel="返回来信" focusId="letter-reply-after-paper"><Feather size={18}/>{reply ? '接着写回信' : '给 TA 回信'}</ContextLink>}{sentReply && <Notice>你写的回应{sentReply.moderation === 'pending' ? '正在等待运营审核' : '已经通过审核'}，这封来信不会重复催办。</Notice>}</div>
       <aside className="stack v2-reading-aside">
         <section className="panel v2-progress-summary"><h2 className="section-title">这封信现在到哪了</h2><p>{status}</p>{delivery?.readAt && <p className="small muted">已打开阅读：{formatDate(delivery.readAt)}</p>}
           <details className="v2-progress-details"><summary>查看每一步</summary><ol className="timeline">
@@ -200,21 +203,24 @@ export function LetterDetail(props: PageProps) {
 }
 const letterSchema = z.object({title:z.string().max(60,'标题请控制在 60 字以内。'),body:z.string().max(6000,'这封信有些长，请控制在 6000 字以内。'),riddleId:z.string()})
 type Fields = z.infer<typeof letterSchema>
-export function ComposePage(props: PageProps & {setDirty:(dirty:boolean) => void}) {
-  const {state,actor} = props, {id} = useParams(), [query] = useSearchParams()
-  const existing = id ? state.letters.find(l => l.id === id) : undefined
+export function ComposePage(props: PageProps & {setDirty:(dirty:boolean) => void; registerSaveDraft:(save?:()=>Promise<boolean>)=>void}) {
+  const {state,actor} = props, {id} = useParams(), [query] = useSearchParams(), location = useLocation()
+  const historyDraftId = !id ? sessionStorage.getItem(`riddle-draft-route:${location.key}`) || undefined : undefined
+  const draftId = id || historyDraftId
+  const existing = draftId ? state.letters.find(l => l.id === draftId) : undefined
   const pairId = existing?.pairId || query.get('pair') || activePair(state,actor)?.id || ''
   const pair = state.pairs.find(p => p.id === pairId)
   const replyId = existing?.replyTo || query.get('replyTo') || undefined
   const original = replyId ? state.letters.find(l => l.id === replyId) : undefined
   const validOriginal = original && pair && original.pairId === pair.id && recipientForLetter(state,original) === actor.id && original.moderation === 'approved' && state.deliveries.some(d => d.letterId === original.id && d.deliveredAt) && canReadLetter(state,actor,original)
-  const denied = !['child','volunteer'].includes(actor.role) || (pair && pair.childId !== actor.id && pair.volunteerId !== actor.id) || pair?.status === 'ended' || !!pairId && !pair || existing && (existing.authorId !== actor.id || !['draft','returned'].includes(existing.moderation)) || id && !existing || replyId && !validOriginal
+  const denied = !['child','volunteer'].includes(actor.role) || (pair && pair.childId !== actor.id && pair.volunteerId !== actor.id) || pair?.status === 'ended' || !!pairId && !pair || existing && (existing.authorId !== actor.id || !['draft','returned'].includes(existing.moderation)) || draftId && !existing || replyId && !validOriginal
   if (denied) return <Empty title="现在还不能写这封信" description="请从自己的信箱选择伙伴或已送达的来信。"><Link className="btn secondary" to="/space">返回{roleHome(actor.role)}</Link></Empty>
-  return <Editor key={`${actor.id}-${id || 'new'}-${replyId || ''}`} {...props} pair={pair} existing={existing} original={original} initialRiddle={query.get('riddle') || query.get('riddleId') || ''}/>
+  return <Editor key={`${actor.id}-${draftId || 'new'}-${replyId || ''}`} {...props} pair={pair} existing={existing} original={original} initialRiddle={query.get('riddle') || query.get('riddleId') || ''}/>
 }
 
-function Editor({state, actor, notify, setDirty, pair, existing, original, initialRiddle, mode = 'demo'}: PageProps & {setDirty:(dirty:boolean) => void; pair?:Pair; existing?:Letter; original?:Letter; initialRiddle:string}) {
+function Editor({state, actor, notify, setDirty, registerSaveDraft, pair, existing, original, initialRiddle, mode = 'demo'}: PageProps & {setDirty:(dirty:boolean) => void; registerSaveDraft:(save?:()=>Promise<boolean>)=>void; pair?:Pair; existing?:Letter; original?:Letter; initialRiddle:string}) {
   const navigate = useNavigate()
+  const location = useLocation()
   const {run, busy, error} = useAction(notify)
   const idRef = useRef(existing?.id || crypto.randomUUID())
   const persistedRef = useRef(!!existing)
@@ -238,21 +244,31 @@ function Editor({state, actor, notify, setDirty, pair, existing, original, initi
   const savedAttachment = state.letters.find(letter => letter.id === idRef.current)?.attachmentId || existing?.attachmentId
   const hasAttachment = !!file || !!savedAttachment && !removeAttachment
   const currentFileRef = useRef(file)
+  const currentRemoveAttachmentRef = useRef(removeAttachment)
+  const saveInFlight = useRef<null | {key:string; promise:Promise<boolean>}>(null)
   currentFileRef.current = file
+  currentRemoveAttachmentRef.current = removeAttachment
 
   useEffect(() => {setDirty(edited); return () => setDirty(false)}, [edited, setDirty])
   useEffect(() => {if (preview && previewDialog.current && !previewDialog.current.open) previewDialog.current.showModal()}, [preview])
   useEffect(() => {
     if (savedRouteId && !busy && !edited && !preview && state.letters.some(letter => letter.id === savedRouteId)) {
-      navigate(`/write/${savedRouteId}`, {replace:true})
+      navigate(`/write/${savedRouteId}`, {replace:true, state:location.state})
     }
-  }, [savedRouteId, busy, edited, preview, state.letters, navigate])
+  }, [savedRouteId, busy, edited, preview, state.letters, navigate, location.state])
 
   const titleFor = (data:Fields) => data.title.trim() || (original ? `给${recipient?.nickname || '伙伴'}的回信` : pair ? `${actor.nickname}的小小分享` : `${actor.nickname}的自我介绍`)
-  async function persist(data:Fields, submit = false, automatic = false) {
+  async function persist(data:Fields, submit = false, automatic = false, keepEditorRoute = false) {
     if (fileError) return false
     const selectedFile = file
-    const okay = await run(async () => {
+    const operationKey = `${JSON.stringify(data)}|${selectedFile?.name || ''}|${selectedFile?.lastModified || ''}|${removeAttachment}`
+    if (saveInFlight.current) {
+      const inFlight = saveInFlight.current
+      const succeeded = await inFlight.promise
+      if (!succeeded) return false
+      if (!submit && inFlight.key === operationKey) return true
+    }
+    const operation = run(async () => {
       const changed = !persistedRef.current || !!existing && existing.pairId !== (pair?.id || '') || JSON.stringify(data) !== baseline.current || !!selectedFile || removeAttachment
       if (changed) {
         const id = await dispatch(actor.id, {type:'save-letter', id:idRef.current, pairId:pair?.id || '', replyTo:original?.id, title:titleFor(data), body:data.body, riddleId:data.riddleId || undefined, file:selectedFile, removeAttachment, expectedRevision:revisionRef.current})
@@ -260,17 +276,19 @@ function Editor({state, actor, notify, setDirty, pair, existing, original, initi
         persistedRef.current = true
         revisionRef.current += 1
         baseline.current = JSON.stringify(data)
+        const currentValuesSaved = JSON.stringify(watch()) === JSON.stringify(data) && currentFileRef.current === selectedFile && currentRemoveAttachmentRef.current === removeAttachment
+        setDirty(!currentValuesSaved)
         setSaved(state.clock)
         setAutoError('')
         setRemoveAttachment(false)
         if (currentFileRef.current === selectedFile) setFile(undefined)
-        if (!existing && !submit) {
-          window.history.replaceState(window.history.state, '', `#/write/${encodeURIComponent(id)}`)
-          setSavedRouteId(id)
-        }
+        if (!existing && !submit && !keepEditorRoute) setSavedRouteId(id)
       }
       if (submit) await dispatch(actor.id, {type:'submit-letter', id:idRef.current, coveredLetterIds:covered.current})
-    }, automatic ? undefined : submit ? '已提交审核，通过后才会送达伙伴。' : '草稿已保存到此浏览器。')
+    }, automatic ? undefined : submit ? '已提交审核，通过后才会送达伙伴。' : mode === 'demo' ? '草稿已保存到此浏览器。' : '草稿已保存到试测账号。')
+    saveInFlight.current = { key: operationKey, promise: operation }
+    const okay = await operation
+    if (saveInFlight.current?.promise === operation) saveInFlight.current = null
     if (okay && submit) {
       previewDialog.current?.close()
       setPreview(undefined)
@@ -279,6 +297,7 @@ function Editor({state, actor, notify, setDirty, pair, existing, original, initi
     }
     return okay
   }
+  useEffect(() => { registerSaveDraft(async () => { const ok = await persist(values, false, false, true); if (ok) sessionStorage.setItem(`riddle-draft-route:${location.key}`, idRef.current); return ok }); return () => registerSaveDraft(undefined) }, [registerSaveDraft, signature, file, removeAttachment, fileError])
   useEffect(() => {
     if (!edited || busy || preview || fileError || autoError) return
     const timer = window.setTimeout(() => {
@@ -298,9 +317,10 @@ function Editor({state, actor, notify, setDirty, pair, existing, original, initi
   }
   const pendingPreview:Letter = {id:'preview', pairId:pair?.id || '', authorId:actor.id, createdBy:actor.id, createdAt:state.clock, updatedAt:state.clock, title:preview ? titleFor(preview) : '', body:preview?.body || '', riddleId:preview?.riddleId || undefined, attachmentId:removeAttachment ? undefined : savedAttachment, moderation:'draft'}
   const back = original ? `/letters/${original.id}` : existing ? '/correspondence' : '/space'
-  const saveMessage = busy ? '正在保存到此浏览器…' : error || autoError ? '还没保存成功' : edited ? '有未保存的修改' : saved ? '已保存到此浏览器' : '开始写后会自动保存'
+  const backLabel = original ? '返回来信' : existing ? '返回书信往来' : `返回${roleHome(actor.role)}`
+  const saveMessage = busy ? (mode === 'demo' ? '正在保存到此浏览器…' : '正在保存到试测账号…') : error || autoError ? '还没保存成功' : edited ? '有未保存的修改' : saved ? (mode === 'demo' ? '已保存到此浏览器' : '已保存到试测账号') : '开始写后会自动保存'
   return <div className="v2-compose-page">
-    <Link className="back-link" to={back}><ArrowLeft size={16}/>返回{original ? '上一封信' : existing ? '书信往来' : roleHome(actor.role)}</Link>
+    <BackLink fallbackTo={back} fallbackLabel={backLabel} />
     <PageHeader eyebrow={original ? '写一封回信' : '写一封信'} title={existing?.moderation === 'returned' ? '把这封信接着写好。' : '想说什么，就从这里开始。'} description="可以只写几句。写完后先检查，再提交给运营审核。" />
     <div className="v2-compose-recipient"><Mail size={18}/><span>{recipient ? `写给 ${recipient.nickname}` : '写给未来的书信伙伴'}</span><small>{pair ? pair.channel === 'paper' ? '老师协助纸质收发' : '线上信箱' : '结对后再确认寄出'}</small></div>
     {existing?.moderation === 'returned' && <Notice tone="warning"><strong>审核建议：</strong>{existing.moderationNote} 原文还在，可以修改后重新提交。</Notice>}
@@ -319,7 +339,7 @@ function Editor({state, actor, notify, setDirty, pair, existing, original, initi
       </section>
       {(error || autoError) && <div className="notice error" role="alert">{error || autoError}<p>输入仍在编辑区。若提示其他设备有修改，请先复制自己的内容，再重新打开这封信查看最新版本。</p></div>}
       <div className="commit-bar"><div className="save-state" role="status"><Save size={15}/>{saveMessage}</div><div className="toolbar"><button className="btn secondary" type="button" disabled={busy || !!fileError} onClick={() => void persist(values)}><Save size={16}/>保存草稿</button><button className="btn" type="submit" disabled={busy || !pair || pair.status !== 'active' || !!fileError}><Send size={16}/>检查并寄出</button></div></div>
-      {!pair && <p className="muted small">还没结对，暂时不能寄出。草稿只保存在当前浏览器。</p>}
+      {!pair && <p className="muted small">还没结对，暂时不能寄出。{mode === 'demo' ? '草稿只保存在当前浏览器。' : '草稿保存在当前成人试测账号。'}</p>}
     </form>
     <dialog ref={previewDialog} className="confirm-dialog letter-preview-dialog" onCancel={() => setPreview(undefined)} aria-labelledby="preview-title"><div className="dialog-content"><div className="toolbar between"><h2 id="preview-title">寄出前，再看一眼</h2><button type="button" aria-label="关闭预览" onClick={() => {previewDialog.current?.close(); setPreview(undefined)}}><X size={22}/></button></div><p>写给{recipient?.nickname}。提交后进入运营审核，通过后才会送达。</p>{preview && <LetterPaper state={state} letter={pendingPreview}/>}<SelectedImage file={file}/>{error && <p role="alert" className="field-error">{error}</p>}<div className="toolbar"><button type="button" className="btn secondary" disabled={busy} onClick={() => {previewDialog.current?.close(); setPreview(undefined)}}>再改一改</button><button type="button" className="btn" disabled={busy} onClick={() => preview && void persist(preview, true)}><Send size={17}/>{busy ? '正在提交…' : '提交审核'}</button></div></div></dialog>
   </div>

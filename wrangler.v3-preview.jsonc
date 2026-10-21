@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "riddle-letters-v3-preview-local",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-10-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "riddle-letters-v3-preview-local",
+      "database_id": "00000000000000000000000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

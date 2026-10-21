@@ -1,0 +1,4 @@
+# Local-only values. Copy to .dev.vars and generate a fresh secret before starting Preview.
+V3_MODE=preview
+BETTER_AUTH_SECRET=replace-with-a-random-secret-of-at-least-32-characters
+BETTER_AUTH_URL=http://127.0.0.1:8788

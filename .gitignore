@@ -6,6 +6,11 @@ playwright-report/
 .env
 .env.*
 !.env.example
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+# V3 Preview 的构建开关不含密钥，需要随仓库一起进入云端构建
+!.env.v3-preview
 *.local
 work/
 .sites-*

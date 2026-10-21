@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import { ArrowRight, BookOpen, Feather, Mail, ShieldCheck } from 'lucide-react'
 import type { Role } from '../types'
+import { cloudConfigured } from '../services/cloud'
 
 export const roleNames: Record<Role, string> = {
   child: '小朋友', volunteer: '志愿者', teacher: '老师', operator: '运营人员',
@@ -20,11 +21,11 @@ const roles = [
 export function RoleEntry({ compact = false }: { compact?: boolean }) {
   return <section className={`role-entry${compact ? ' role-entry-compact' : ''}`} aria-labelledby="entry-title">
     <div className="role-entry-heading">
-      <div><p className="eyebrow">选择演示身份</p><h2 id="entry-title">你想从哪一步开始？</h2></div>
-      <p>四个入口都能直接操作。这里使用虚构人物，记录只保存在当前浏览器。</p>
+      <div><p className="eyebrow">{cloudConfigured ? '成人试测 · 合成身份' : '选择演示身份'}</p><h2 id="entry-title">你想从哪一步开始？</h2></div>
+      <p>{cloudConfigured ? '选择要体验的角色后使用试测账号登录。账号实际身份由服务端确定。' : '四个入口都能直接操作。这里使用虚构人物，记录只保存在当前浏览器。'}</p>
     </div>
     <div className="identity-options">
-      {roles.map(({ role, title, description, icon: Icon, tone }) => <Link key={role} to={`/demo/start/${role}`} className="identity-card">
+      {roles.map(({ role, title, description, icon: Icon, tone }) => <Link key={role} to={cloudConfigured ? `/login/${role}` : `/demo/start/${role}`} className="identity-card">
         <span className={`identity-icon ${tone}`}><Icon size={25} strokeWidth={1.55}/></span>
         <span className="identity-copy"><strong>{title}</strong><small>{description}</small></span>
         <ArrowRight className="identity-arrow" size={18}/>

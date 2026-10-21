@@ -16,3 +16,12 @@
 @media(max-width:680px){.story-feature>div:nth-child(2){flex:1 0 calc(100% - 61px)}.closing-banner>div{flex:1 0 calc(100% - 53px)}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.toast{translate:0 0}.reading-grid>.stack>.letter-paper{opacity:1;transform:none}}
 @media print{.demo-strip,.site-header,.demo-toolbar,.app-sidebar,.site-footer,.toast,.back-link,.reading-grid>aside{display:none!important}.container{width:100%;max-width:none}.app-layout{display:block;padding:0}.letter-paper{box-shadow:none;border:0;padding:0}.letter-paper:before{display:none}.letter-body{font-size:12pt}.letter-paper button{display:none}.letter-paper .riddle-block{break-inside:avoid}.public-main{display:none}body{background:#fffdf8}}
+
+/* V3 interaction feedback and safe-area adjustments */
+.workflow-outcome{display:flex;align-items:center;justify-content:space-between;gap:22px;padding:22px 24px;border:1px solid #bfcdb9;border-left:4px solid var(--green);border-radius:13px;background:#edf2e8;color:var(--ink)}
+.workflow-outcome h2{font-size:18px;margin:4px 0 10px}.workflow-outcome p{font-size:13px;line-height:1.8;margin:4px 0}.workflow-outcome>.btn{flex-shrink:0}
+.navigation-guard-dialog{max-width:min(520px,calc(100vw - 32px))}.navigation-guard-dialog .dialog-content{display:flex;flex-direction:column;gap:14px}.navigation-guard-actions{flex-wrap:wrap;justify-content:flex-end}
+.back-link{cursor:pointer}
+.v2-mobile-nav{padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
+@media(max-width:680px){.workflow-outcome{align-items:stretch;flex-direction:column;padding:18px}.workflow-outcome>.btn{width:100%;justify-content:center}.navigation-guard-actions{display:grid;grid-template-columns:1fr}.navigation-guard-actions .btn{width:100%;justify-content:center}.v2-compose-page .commit-bar{bottom:calc(6px + env(safe-area-inset-bottom,0px))}}
+@media(max-width:680px) and (max-height:620px){.v2-compose-page .commit-bar{position:static;margin-bottom:calc(82px + env(safe-area-inset-bottom,0px))}}

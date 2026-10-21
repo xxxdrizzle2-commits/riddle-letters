@@ -6,10 +6,12 @@
   "description": "谜语书信四角色互动 Demo · V2 体验优化",
   "dependencies": {
     "@hookform/resolvers": "5.2.2",
+    "better-auth": "1.7.12",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "dexie": "4.4.6",
     "dexie-react-hooks": "4.4.0",
+    "jose": "6.2.13",
     "lucide-react": "1.59.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
@@ -29,11 +31,18 @@
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.4",
-    "vitest": "5.0.5"
+    "vitest": "5.0.5",
+    "wrangler": "4.151.3"
   },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "typecheck:v3": "tsc --noEmit -p tsconfig.v3.json",
+    "build:v3-preview": "npm run typecheck:v3 && vite build --mode v3-preview",
+    "dev:v3-preview": "npm run build:v3-preview && wrangler pages dev dist --config wrangler.v3-preview.jsonc --ip 127.0.0.1 --port 8788",
+    "db:v3-preview:migrate": "wrangler d1 migrations apply DB --local --config wrangler.v3-preview.jsonc",
+    "db:v3-preview:status": "wrangler d1 migrations list DB --local --config wrangler.v3-preview.jsonc",
+    "v3:seed-test-accounts": "node scripts/seed-v3-preview-accounts.mjs",
     "test": "vitest run",
     "e2e": "playwright test",
     "preview": "vite preview"

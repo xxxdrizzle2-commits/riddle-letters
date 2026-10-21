@@ -93,7 +93,7 @@ function resultId(command: Command, previous: AppState, next: AppState): string 
 }
 export async function executeCommand(repository: Repository, identity: Identity, input: { command: Command; requestId: string; expectedRevision?: number }, now = new Date().toISOString()) {
   return repository.transact(store => {
-    const account = getAccount(store, identity, true); store.state.clock = now
+    const account = getAccount(store, identity, true)
     syncPermissions(store)
     requireValue(typeof input.requestId === 'string' && /^[a-zA-Z0-9_-]{12,100}$/.test(input.requestId), '缺少有效的操作编号')
     requireValue(input.command && commandTypes.has(input.command.type), '不支持此项操作')
@@ -108,6 +108,7 @@ export async function executeCommand(repository: Repository, identity: Identity,
     const key = `${identity.uid}:${input.requestId}`; const hash = digest(JSON.stringify(input.command)); const previous = store.receipts[key]
     if (previous) { requireValue(previous.hash === hash, '操作编号已用于其他内容', 'CONFLICT'); return { ...snapshot(store, identity), resultId: previous.resultId } }
     if (input.expectedRevision !== undefined) requireValue(input.expectedRevision === store.revision, '内容已在另一台设备更新，请刷新后核对；你的输入仍然保留', 'CONFLICT')
+    store.state.clock = now
     throttle(store, identity.uid, now)
     const previousState = store.state
     const nextState = reduceCommand(previousState, identity.uid, input.command, { formal: true })
