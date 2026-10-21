@@ -1,28 +1,33 @@
-# V3 Preview：成人试测本地运行
+# V3 成人试测：本地运行与线上登录
 
-V3 Preview 与公开 V2 Demo 使用不同构建入口和不同数据库。公开站继续使用浏览器 Dexie 数据；本地 Preview 使用 Cloudflare Pages Functions 和本机 D1。此文档不代表远程 Cloudflare Pages 项目、D1 绑定或 Access 策略已经配置。
+## 当前站点与边界
 
-## 本机启动
+- V3 成人试测站：<https://riddle-letters-v3.pages.dev/>。这是独立的 Cloudflare Pages 项目 `riddle-letters-v3`，从 `dev` 分支手动部署；网页入口可直接打开，进入角色后用对应试测账号登录。
+- V2 公开演示站：<https://riddle-letters.pages.dev/>。它继续使用浏览器本地合成数据，不与 V3 的 D1 数据库互通。
+- V3 四个账号均由成年人持有，分别扮演小朋友、志愿者、老师和运营；人物与书信均为合成内容。试测账号保存在仓库外的 `D:\大创\work\v3-test-accounts.md`，不要把密码提交到 GitHub 或发到公开群组。
 
-1. 安装依赖后，复制 `.dev.vars.example` 为 `.dev.vars`，设置一个只用于本机的随机 `BETTER_AUTH_SECRET`（至少 32 个随机字符）。`.dev.vars` 已列入 Git 忽略规则。
-2. 应用本机 D1 迁移：`npm run db:v3-preview:migrate`。
-3. 建立四个成人测试账号和合成角色资料：`npm run v3:seed-test-accounts`。脚本逐个提示邮箱、显示称呼和密码；密码只写入 Better Auth 的密码哈希，不输出或保存到源码。不要输入真实儿童或真实参与者资料。
-4. 启动本地 Pages 预览：`npm run dev:v3-preview`，浏览器打开 `http://127.0.0.1:8788`。
+当前 V3 不使用 Cloudflare Access 作为试测者登录步骤。旧的 Access 配置说明已失效；部署专属子域名可能仍出现 Access 页面，试测时使用上面的固定站点地址。网页外壳可公开打开，但信件、结对和操作接口必须由试测账号会话及服务端角色权限校验。没有开放公众注册，也不要让真实儿童参与本轮试测。
 
-本地预览默认仅绑定 `127.0.0.1`，Access JWT 只在本机开发地址绕过验证。不要把本地配置用于远程部署。纸质流程的云端试测只支持老师代录文字，图片上传仍限于独立 Demo。
+## 线上试测怎么进入
 
-## 远程 Preview 的前置条件
+1. 打开 V3 固定地址，选择分配的角色。
+2. 从私下收到的账号资料中取出该角色的邮箱和密码，登录。不要把密码写进反馈截图。
+3. 两人一组时，一人用手机、一人用电脑，同时以**不同角色账号**登录；按 [V3 成人试测任务单](./V3-成人试测任务单.md) 完成同一轮书信，观察另一台设备是否及时看到新状态。
+4. 退出后再换角色。共用设备上不要保留登录状态；试测数据只写合成内容。
 
-创建或修改远程资源前，先在 Cloudflare 控制台核对具体 Pages 项目、生产分支、部署设置和现有绑定。本仓库未凭 Dashboard 链接推断这些设置。只有确认项目后，才能在该项目创建**独立的 Preview D1**，配置 `DB` 绑定与迁移，并把 Better Auth 密钥、`V3_MODE=preview`、`V3_ACCESS_TEAM_DOMAIN` 和 `V3_ACCESS_AUD` 作为 Preview 环境变量或密钥保存。
+健康检查地址是 `https://riddle-letters-v3.pages.dev/api/health`；`200` 且 `apiReady: true` 表示试测 API 与数据库基础表可用，不能代替完整操作和权限测试。V3 试测站目前只提供文字书信及老师文字代录；付费图片转换与私有 R2 尚未接入，写信页已隐藏图片上传入口。
 
-Cloudflare Access 应给 Preview 域名配置成人试测者允许名单；Pages 函数还会验证 Access 注入的 JWT 签名、签发者和 audience。访问保护缺失时服务器拒绝服务。不要在公开生产部署设置 `V3_MODE=preview`，不要把测试 D1 绑定到生产环境，也不要在 Preview 保护和权限验证完成前分享地址。
+## 本机运行
 
-迁移应通过已核实的 Preview 项目与独立数据库执行。当前 custom Wrangler 配置是 local-only，包含占位数据库 ID，不应用于远程发布。
+1. 安装锁定依赖后，将 `.dev.vars.example` 复制为 `.dev.vars`，设置只用于本机的随机 `BETTER_AUTH_SECRET`（至少 32 个随机字符）。`.dev.vars` 已在 Git 忽略规则内。
+2. 执行 `npm run db:v3-preview:migrate`，为本机 D1 应用迁移。
+3. 执行 `npm run v3:seed-test-accounts`，按交互提示建立四个成人合成角色账号。密码以哈希写入本机数据库，脚本不把明文保存到源码。不要输入真实儿童或真实参与者资料。
+4. 执行 `npm run dev:v3-preview`，打开 `http://127.0.0.1:8788`。本机服务只监听 `127.0.0.1`，本机 D1 与线上试测 D1 分开。
 
-## 发布与回滚边界
+线上既有账号不能自动用于本机；本机脚本建立的账号也不会出现在远程站点。不要把 `.dev.vars` 或本机数据库复制到远程环境。
 
-- 本轮不触发 Cloudflare Pages 部署，也不改生产分支。
-- 公开 V2 的入口、Dexie 数据与页面构建保持独立。
-- 远程 Preview 必须在成人测试账号建好、Access 覆盖应用与 API、恢复方式核实后，才交给三位试用者。
-- 四位成人分别持有合成角色账号；不创建真实儿童账号，不导入 Demo 数据，不开放公众注册。
-- 回滚时保留 Preview D1 供审计，不将其绑定到 V2 公共站；如需销毁测试数据，先完成备份并逐项核对目标环境。
+## 更新与回滚
+
+更新前确认部署目标为 `riddle-letters-v3`、分支为 `dev`，并先完成构建与浏览器闭环检查。V2 项目 `riddle-letters` 与其 `main` 分支不是本轮部署目标。当前代码锚点：`v3` 指向 `fbfb0fe`，`v3.1` 指向 `36277b5`；后续文档提交不移动这些标签。
+
+Cloudflare Pages 的部署可回退网页与 Functions 代码；**回退代码不会自动回退 D1 数据**。如有数据库迁移，先核对旧代码与现有表结构是否兼容，并保留备份与变更记录。试测结束后由项目负责人决定测试账号停用及合成数据清理，不将试测 D1 绑定到 V2 站点。
