@@ -14,7 +14,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function unavailable(): never {
-  throw new Error('账号和云端数据仅在受保护的 V3 成人试测 Preview 中启用。当前公开版继续使用本地合成数据。')
+  throw new Error('账号和云端数据仅在受保护的 V3 试测登录 Preview 中启用。当前公开版继续使用本地合成数据。')
 }
 
 export async function getCloudSession(): Promise<boolean> {
@@ -50,5 +50,5 @@ export async function changePassword(_input: { oldPassword: string; newPassword:
 }
 export async function activateInvite(_input: { token: string; username: string; password: string; nickname?: string }): Promise<{ username: string }> { return unavailable() }
 export async function downloadAttachment(_id: string): Promise<Blob> {
-  throw new Error('V3 成人试测暂不提供云端图片附件；图片仍只在本地 Demo 使用。')
+  throw new Error('V3 试测登录暂不提供云端图片附件；图片仍只在本地 Demo 使用。')
 }

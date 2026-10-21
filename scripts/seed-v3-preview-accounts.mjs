@@ -6,10 +6,10 @@ import { hashPassword } from 'better-auth/crypto'
 import { getPlatformProxy } from 'wrangler'
 
 const roles = [
-  { role: 'child', example: '小树', subtitle: '成人试测 · 合成孩子角色', avatar: '🌱', interests: ['谜语', '植物', '画画'] },
-  { role: 'volunteer', example: '林溪', subtitle: '成人试测 · 合成志愿者角色', avatar: '✉️', interests: ['阅读', '散步', '观察'] },
-  { role: 'teacher', example: '周老师', subtitle: '成人试测 · 合成老师角色', avatar: '📚', interests: [] },
-  { role: 'operator', example: '运营同学', subtitle: '成人试测 · 合成运营角色', avatar: '🪴', interests: [] },
+  { role: 'child', example: '小树', subtitle: '试测登录 · 合成孩子角色', avatar: '🌱', interests: ['谜语', '植物', '画画'] },
+  { role: 'volunteer', example: '林溪', subtitle: '试测登录 · 合成志愿者角色', avatar: '✉️', interests: ['阅读', '散步', '观察'] },
+  { role: 'teacher', example: '周老师', subtitle: '试测登录 · 合成老师角色', avatar: '📚', interests: [] },
+  { role: 'operator', example: '运营同学', subtitle: '试测登录 · 合成运营角色', avatar: '🪴', interests: [] },
 ]
 const operatorPermissions = ['accounts', 'moderate', 'followup', 'help', 'privacy']
 const permissionsFor = role => role === 'operator' ? operatorPermissions : []

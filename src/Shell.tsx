@@ -255,11 +255,11 @@ function LiveLayout({ actor, onLogout, children }: { actor: Person; onLogout: ()
   return <div className="v2-demo-layout">
     <header className="v2-demo-header"><div className="container v2-demo-header-inner">
       <Link className="brand v2-demo-brand" to="/space"><span className="brand-icon"><Mail strokeWidth={1.5}/><Leaf size={16}/></span><span>谜语书信</span></Link>
-      <div className="v2-demo-identity"><strong>{roleNames[actor.role]}</strong><span>成人试测 · 合成身份与内容</span></div>
+      <div className="v2-demo-identity"><strong>{roleNames[actor.role]}</strong><span>试测登录 · 合成身份与内容</span></div>
       <div className="v2-demo-tools">{actor.role === 'child' && <ContextLink className="v2-help-link" to="/help" returnTo="/space" returnLabel="返回信箱" historyBack={false}><HeartHandshake size={17}/>找人帮忙</ContextLink>}<button className="v2-account-link" type="button" onClick={onLogout}><UserRound size={17}/>退出登录</button></div>
     </div></header>
     <div className="app-layout container v2-app-layout">
-      <aside className="app-sidebar v2-app-sidebar"><div className="sidebar-person"><Avatar person={actor} large/><h2>{actor.nickname}</h2><span>{roleNames[actor.role]} · 成人试测账号</span></div><DemoNav role={actor.role}/><div className="v2-sidebar-foot"><p>试测数据用于验证流程。</p><small>请勿输入真实儿童或个人敏感信息</small></div></aside>
+      <aside className="app-sidebar v2-app-sidebar"><div className="sidebar-person"><Avatar person={actor} large/><h2>{actor.nickname}</h2><span>{roleNames[actor.role]} · 试测登录账号</span></div><DemoNav role={actor.role}/><div className="v2-sidebar-foot"><p>试测数据用于验证流程。</p><small>请勿输入真实儿童或个人敏感信息</small></div></aside>
       <main id="main-content" tabIndex={-1} className="app-main">{children}</main>
     </div>
     <DemoNav role={actor.role} mobile/>

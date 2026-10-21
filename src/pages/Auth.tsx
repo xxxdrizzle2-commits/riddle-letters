@@ -41,7 +41,7 @@ export function AuthPage({ kind = 'login', notify }: { kind?: 'login' | 'registe
       }
       const actualRole = snapshot.profile.role
       if (actualRole !== role) notify?.(`此账号的实际身份是“${roleNames[actualRole]}”，已按账号权限进入对应工作区。`)
-      else notify?.(`已进入${roleNames[actualRole]}成人试测工作区。`)
+      else notify?.(`已进入${roleNames[actualRole]}试测工作区。`)
       navigate('/space', { replace: true })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '登录没有完成，请检查账号后重试。')
@@ -50,15 +50,15 @@ export function AuthPage({ kind = 'login', notify }: { kind?: 'login' | 'registe
 
   if (cloudConfigured && kind !== 'login') return <div className="container auth-layout auth-unavailable">
     <aside className="auth-aside"><img src="/images/letter-garden.webp" alt="打开的信和沿着花草小路飞来的小鸟"/><h2>慢慢相识，<br/>好好回应。</h2></aside>
-    <section className="auth-panel"><Link className="back-link" to="/choose"><ArrowLeft size={16}/>返回角色入口</Link><Leaf size={29} color="#356B55"/><h1>成人试测采用邀请制</h1><p>试测期间不开放公众注册、账号恢复或儿童账号激活。请由试测负责人准备账号；如无法登录，请联系负责人处理。</p><Link className="btn" to="/login/volunteer">前往试测登录<ArrowRight size={17}/></Link><p className="auth-footnote">全部测试使用成年人和合成身份，不接入真实儿童资料。</p></section>
+    <section className="auth-panel"><Link className="back-link" to="/choose"><ArrowLeft size={16}/>返回角色入口</Link><Leaf size={29} color="#356B55"/><h1>试测登录采用邀请制</h1><p>试测期间不开放公众注册、账号恢复或儿童账号激活。请由试测负责人准备账号；如无法登录，请联系负责人处理。</p><Link className="btn" to="/login/volunteer">前往试测登录<ArrowRight size={17}/></Link><p className="auth-footnote">全部测试使用成年人和合成身份，不接入真实儿童资料。</p></section>
   </div>
 
   if (cloudConfigured) return <div className="container auth-layout">
-    <aside className="auth-aside"><img src="/images/letter-garden.webp" alt="打开的信和沿着花草小路飞来的小鸟"/><h2>慢慢相识，<br/>好好回应。</h2><p>成人试测 · 合成身份</p></aside>
+    <aside className="auth-aside"><img src="/images/letter-garden.webp" alt="打开的信和沿着花草小路飞来的小鸟"/><h2>慢慢相识，<br/>好好回应。</h2><p>试测登录 · 合成身份</p></aside>
     <section className="auth-panel">
       <Link className="back-link" to="/choose"><ArrowLeft size={16}/>返回角色入口</Link>
       <Leaf size={29} color="#356B55"/>
-      <h1>登录成人试测</h1>
+      <h1>试测登录</h1>
       <p>你选了“{roleNames[role]}”入口。登录后会按服务端记录的真实测试角色进入工作区。</p>
       <form className="auth-form" onSubmit={submit} aria-busy={busy}>
         <div className="field"><label htmlFor="test-email">试测邮箱</label><input id="test-email" type="email" autoComplete="username" inputMode="email" value={email} onChange={event => setEmail(event.target.value)} required maxLength={200} /></div>

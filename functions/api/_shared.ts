@@ -7,7 +7,7 @@ export function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, { status, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } })
 }
 export function requirePreview(env: V3Env) {
-  if (env.V3_MODE !== 'preview' || !env.DB || !env.BETTER_AUTH_SECRET) throw new ServiceError('V3_PREVIEW_DISABLED', 'V3 成人试测接口尚未在受保护的 Preview 启用')
+  if (env.V3_MODE !== 'preview' || !env.DB || !env.BETTER_AUTH_SECRET) throw new ServiceError('V3_PREVIEW_DISABLED', 'V3 试测登录接口尚未启用')
 }
 export function requireSameOrigin(request: Request) {
   const origin = request.headers.get('Origin')
@@ -19,10 +19,10 @@ export async function identityFor(context: PagesContext<V3Env>): Promise<Identit
   requirePreview(env)
   const auth = createBetterAuth(env, request)
   const session = await auth.api.getSession({ headers: request.headers })
-  if (!session?.user?.id) throw new ServiceError('UNAUTHENTICATED', '请先登录成人试测账号')
+  if (!session?.user?.id) throw new ServiceError('UNAUTHENTICATED', '请先登录试测账号')
   const accountRows = await env.DB!.prepare('SELECT role, status FROM app_accounts WHERE user_id = ?').bind(session.user.id).all()
   const account = accountRows.results[0]
-  if (!account) throw new ServiceError('ACCOUNT_REQUIRED', '此账号尚未加入 V3 成人试测，请联系试测负责人')
+  if (!account) throw new ServiceError('ACCOUNT_REQUIRED', '此账号尚未加入 V3 试测登录，请联系试测负责人')
   if (account.status !== 'active') throw new ServiceError('ACCOUNT_DISABLED', '试测账号当前不可用，请联系试测负责人')
   return { uid: session.user.id, email: session.user.email || undefined }
 }

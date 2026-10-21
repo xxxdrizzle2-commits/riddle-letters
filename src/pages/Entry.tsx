@@ -21,7 +21,7 @@ const roles = [
 export function RoleEntry({ compact = false }: { compact?: boolean }) {
   return <section className={`role-entry${compact ? ' role-entry-compact' : ''}`} aria-labelledby="entry-title">
     <div className="role-entry-heading">
-      <div><p className="eyebrow">{cloudConfigured ? '成人试测 · 合成身份' : '选择演示身份'}</p><h2 id="entry-title">你想从哪一步开始？</h2></div>
+      <div><p className="eyebrow">{cloudConfigured ? '试测登录 · 合成身份' : '选择演示身份'}</p><h2 id="entry-title">你想从哪一步开始？</h2></div>
       <p>{cloudConfigured ? '选择要体验的角色后使用试测账号登录。账号实际身份由服务端确定。' : '四个入口都能直接操作。这里使用虚构人物，记录只保存在当前浏览器。'}</p>
     </div>
     <div className="identity-options">
