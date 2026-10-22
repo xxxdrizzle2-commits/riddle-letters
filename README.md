@@ -61,4 +61,4 @@ npm run e2e
 - 早期未启用的 CloudBase 原型已从最终 MVP 工作树移除，历史仍可从 Git 读取。V3 实际后端路径是 `functions/api/`、`server/core.ts`、`server/d1-repository.ts` 和 `migrations/`。
 - Cloudflare Pages 代码回滚不会自动回滚 D1 数据。数据清理、迁移与重新播种应先备份，并在冻结清单里记录。
 
-V3 的操作指南和合成账号试用任务见 [V3 成人试测任务单](./docs/V3-成人试测任务单.md)。
+如需再次核对操作，可使用 [V3 成人复测任务单](./docs/V3-成人试测任务单.md)。冻结 MVP 已用预设的四个合成账号完成内部验证，发布不以邀请更多试用者为条件。
