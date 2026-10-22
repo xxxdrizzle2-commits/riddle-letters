@@ -1,13 +1,15 @@
 # 谜语书信陪伴平台
 
-四角色书信陪伴网站。当前仓库保留两条相互隔离的运行路径：浏览器本地的 V2 合成数据演示，以及使用四个成人合成账号的 V3 云端试测。V3 的最小可运行版本已按 `v3.2-mvp` 冻结；结果见 [MVP 冻结验收记录](./docs/MVP-冻结验收清单.md)。
+四角色书信陪伴网站。**当前交付版本为 V3 最小可运行版本（MVP）**，功能冻结点为 [`v3.2-mvp`](https://github.com/xxxdrizzle2-commits/riddle-letters/tree/v3.2-mvp)。源码同时支持浏览器本地的 V2 合成数据演示，以及使用四个成人合成账号的 V3 云端试测。验收范围、证据和限制见 [MVP 冻结验收记录](./docs/MVP-冻结验收清单.md)。
 
 ## 版本与站点
 
 | 版本 | 地址与分支 | 数据和用途 |
 | --- | --- | --- |
-| V2 Demo | [riddle-letters.pages.dev](https://riddle-letters.pages.dev/)；`main` | 在当前浏览器的 IndexedDB 保存合成数据，可切换小朋友、志愿者、老师和运营演示身份。身份切换不代表正式认证。 |
-| V3 成人试测 | [riddle-letters-v3.pages.dev](https://riddle-letters-v3.pages.dev/)；`dev` | 独立 Cloudflare Pages 项目，使用 Pages Functions、D1 和 Better Auth。四个成人分别使用预置合成账号，服务端检查角色权限及数据范围；信件和状态在账号间共享。 |
+| V3 MVP 成人试测 | [riddle-letters-v3.pages.dev](https://riddle-letters-v3.pages.dev/)；从 `dev` 手动部署 | 独立 Cloudflare Pages 项目，使用 Pages Functions、D1 和 Better Auth。四个成人分别使用预置合成账号，服务端检查角色权限及数据范围；信件和状态在账号间共享。 |
+| V2 Demo | [riddle-letters.pages.dev](https://riddle-letters.pages.dev/)；从 `main` 自动部署 | 使用默认 `npm run build`，在当前浏览器的 IndexedDB 保存合成数据，可切换小朋友、志愿者、老师和运营演示身份。身份切换不代表正式认证。 |
+
+GitHub 默认分支 `main` 已同步 V3 MVP 源码，`dev` 保留为 V3 试测站的手动部署来源。**分支包含同一套源码，不表示两个网址运行同一模式或共用数据。**V3 仅在 `npm run build:v3-preview` 且服务端配置齐全时启用云端账号；V2 站点仍使用默认构建和本地演示数据。
 
 V3 的主要路径是结对、双方写信、人工审核、线上或老师协助的纸质送达、阅读、回信和跟进。纸质场景分别记录**打印、实际交付、阅读**；提交审核不等于送达。V2 与 V3 不共用业务数据库，不能将 V2 的角色切换当作 V3 权限测试。
 
@@ -49,7 +51,7 @@ npm run build:v3-preview
 npm run e2e
 ```
 
-`npm run build` 构建 V2 本地 Demo；`npm run build:v3-preview` 使用 `v3-preview` 模式构建 V3 前端并检查 Functions/服务端类型。`npm run e2e` 在本地 Vite 服务上运行桌面和手机视口 Playwright 场景，**不是 V3 真实登录、D1 或跨设备测试**。V3 云端闭环和权限需另用四个独立账号验证，并保存对应版本与证据。首次运行 Playwright 如缺少浏览器，可执行 `npx playwright install chromium --only-shell`。
+`npm run build` 构建 V2 本地 Demo；`npm run build:v3-preview` 使用 `v3-preview` 模式构建 V3 前端并检查 Functions/服务端类型。`npm run e2e` 在本地 Vite 服务上运行桌面和手机视口 Playwright 场景，**不是 V3 真实登录、D1 或跨设备测试**。V3 云端闭环和权限使用四个独立账号验证，证据与局限记录在冻结验收清单。首次运行 Playwright 如缺少浏览器，可执行 `npx playwright install chromium --only-shell`。
 
 ## 当前 MVP 边界
 

@@ -2,8 +2,8 @@
 
 ## 当前站点与边界
 
-- V3 成人试测站：<https://riddle-letters-v3.pages.dev/>。这是独立的 Cloudflare Pages 项目 `riddle-letters-v3`，从 `dev` 分支手动部署；网页入口可直接打开，进入角色后用对应试测账号登录。
-- V2 公开演示站：<https://riddle-letters.pages.dev/>。它继续使用浏览器本地合成数据，不与 V3 的 D1 数据库互通。
+- V3 成人试测站：<https://riddle-letters-v3.pages.dev/>。这是独立的 Cloudflare Pages 项目 `riddle-letters-v3`，使用 `dev` 分支的 `npm run build:v3-preview` 产物手动部署；网页入口可直接打开，进入角色后用对应试测账号登录。
+- V2 公开演示站：<https://riddle-letters.pages.dev/>。它从 GitHub `main` 自动执行默认 `npm run build`，继续使用浏览器本地合成数据，不与 V3 的 D1 数据库互通。`main` 已同步 V3 MVP 源码，但默认构建仍是 V2 演示模式。
 - V3 四个账号均由成年人持有，分别扮演小朋友、志愿者、老师和运营；人物与书信均为合成内容。试测账号保存在仓库外的 `D:\大创\work\v3-test-accounts.md`，不要把密码提交到 GitHub 或发到公开群组。
 
 当前 V3 不使用 Cloudflare Access 作为试测者登录步骤。旧的 Access 配置说明已失效；部署专属子域名可能仍出现 Access 页面，试测时使用上面的固定站点地址。网页外壳可公开打开，但信件、结对和操作接口必须由试测账号会话及服务端角色权限校验。没有开放公众注册，也不要让真实儿童参与本轮试测。
@@ -28,6 +28,6 @@
 
 ## 更新与回滚
 
-更新前确认部署目标为 `riddle-letters-v3`、分支为 `dev`，并先完成构建与浏览器闭环检查。V2 项目 `riddle-letters` 与其 `main` 分支不是本轮部署目标。代码锚点：`v3` 指向 `fbfb0fe`，`v3.1` 指向 `36277b5`，最终 MVP 使用 `v3.2-mvp`；旧标签不移动。
+更新 V3 前确认部署目标为 `riddle-letters-v3`，使用 `dev` 的 V3 模式构建，并先完成构建与浏览器闭环检查。推送 `main` 会触发 V2 项目 `riddle-letters` 的自动部署，必须另行检查默认构建和公开站。代码锚点：`v3` 指向 `fbfb0fe`，`v3.1` 指向 `36277b5`，最终 MVP 使用 `v3.2-mvp`；旧标签不移动。
 
 Cloudflare Pages 的部署可回退网页与 Functions 代码；**回退代码不会自动回退 D1 数据**。如有数据库迁移，先核对旧代码与现有表结构是否兼容，并保留备份与变更记录。试测结束后由项目负责人决定测试账号停用及合成数据清理，不将试测 D1 绑定到 V2 站点。
