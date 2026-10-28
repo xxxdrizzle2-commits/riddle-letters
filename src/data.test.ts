@@ -218,15 +218,43 @@ describe('正式权限与受限求助', () => {
     expect(scopeState(state, 't1').letters.some(l => l.id === 'paper')).toBe(false)
   })
   it('求助只对申请人和有受理权限的运营可见，不自动告知被反映的老师', () => {
-    let state = run(seed(), 'c1', { type: 'help', pairId: 'p1', body: '有件事情想私下和运营说。' })
+    let state = run(seed(), 'c1', { type: 'help', pairId: 'p1', body: '有件事情想私下和运营说。', reportedParty: 'teacher', reportedPersonId: 't1' })
     const help = state.followups.find(f => f.kind === 'help')!
     expect(help.requesterId).toBe('c1')
+    expect(help.reportedPersonId).toBe('t1')
     expect(scopeState(state, 'c1').followups.some(f => f.id === help.id)).toBe(true)
     expect(scopeState(state, 't1').followups).toHaveLength(0)
     expect(scopeState(state, 'v1').followups).toHaveLength(0)
     state.people.find(p => p.id === 'op1')!.permissions = ['review']
     expect(scopeState(state, 'op1').followups).toHaveLength(0)
     expect(() => run(state, 'op1', { type: 'resolve-followup', id: help.id, note: '已经处理完成' })).toThrow('权限')
+  })
+  it('无结对求助不会默认关联第一组，伪造他人结对或被反映人身份会被拒绝', () => {
+    const state = seed()
+    const helped = run(state, 'c1', { type: 'help', body: '我需要帮助。', reportedParty: 'other' })
+    expect(helped.followups.find(f => f.kind === 'help')?.pairId).toBeUndefined()
+    expect(helped.followups.find(f => f.kind === 'help')?.ownerId).toBe('op1')
+    expect(() => run(state, 'c1', { type: 'help', pairId: 'p2', body: '我需要帮助。', reportedParty: 'other' })).toThrow('自己的书信伙伴')
+    expect(() => run(state, 'c1', { type: 'help', body: '我需要帮助。', reportedParty: 'teacher', reportedPersonId: 't2' })).toThrow('与你有关')
+  })
+  it('被反映的运营无法读取、接手或关闭求助，独立人员才能处理', () => {
+    const state = seed()
+    state.people.push({ id: 'op2', role: 'operator', nickname: '另一位保护人员', subtitle: '', avatar: '', interests: [], permissions: ['safeguarding'] })
+    const helped = run(state, 'c1', { type: 'help', body: '想反映一位运营人员。', reportedParty: 'operator', reportedPersonId: 'op1' })
+    const help = helped.followups.find(f => f.kind === 'help')!
+    expect(help.ownerId).toBe('op2')
+    expect(scopeState(helped, 'op1').followups.some(f => f.id === help.id)).toBe(false)
+    expect(scopeState(helped, 'op2').followups.some(f => f.id === help.id)).toBe(true)
+    expect(() => run(helped, 'op1', { type: 'resolve-followup', id: help.id, note: '已经处理完成' })).toThrow('被反映人')
+    expect(() => run(helped, 'op2', { type: 'assign-followup', id: help.id, ownerId: 'op1' })).toThrow('无需回避')
+    expect(run(helped, 'op2', { type: 'resolve-followup', id: help.id, note: '已交独立人员核实。' }).followups.find(f => f.id === help.id)?.status).toBe('resolved')
+  })
+  it('没有独立保护人员时不保存求助或显示成功', () => {
+    const state = seed()
+    expect(() => run(state, 'c1', { type: 'help', body: '想反映一位运营人员。', reportedParty: 'operator', reportedPersonId: 'op1' })).toThrow('没有可独立接手')
+    state.people.find(p => p.id === 'op1')!.permissions = ['administration']
+    expect(() => run(state, 'c1', { type: 'help', body: '我需要帮助。', reportedParty: 'other' })).toThrow('没有可独立接手')
+    expect(state.followups.some(f => f.kind === 'help')).toBe(false)
   })
   it('已处理但尚未回应的事项到下次跟进时间重新打开', () => {
     let state = at(seed(), '2026-11-10')

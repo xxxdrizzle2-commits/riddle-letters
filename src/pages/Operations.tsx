@@ -373,9 +373,16 @@ function FollowupQueue({ state, actor, notify, mode = 'demo' }: Props) {
   const [extensionDate, setExtensionDate] = useState('')
   const [extensionReason, setExtensionReason] = useState('')
   const { run, busy, error } = useAction(notify)
-  const items = state.followups.filter(item => item.status === filter && (item.kind === 'help' ? hasPermission(actor, 'safeguarding') : hasPermission(actor, 'administration')))
-    .sort((a, b) => (a.kind === 'help' ? 0 : 1) - (b.kind === 'help' ? 0 : 1) || Date.parse(a.createdAt) - Date.parse(b.createdAt))
-  const selected = items.find(item => item.id === selectedId)
+  const canHelp = hasPermission(actor, 'safeguarding') && actor.accountStatus !== 'disabled'
+  const canAdmin = hasPermission(actor, 'administration') && actor.accountStatus !== 'disabled'
+  const canView = (item: AppState['followups'][number]) => item.kind === 'help'
+    ? canHelp && item.reportedPersonId !== actor.id
+    : canAdmin
+  const visibleItems = state.followups.filter(item => item.status === filter && canView(item))
+  const selected = visibleItems.find(item => item.id === selectedId)
+  const kind = selected?.kind ?? (searchParams.get('kind') === 'help' && canHelp ? 'help' : canAdmin ? 'overdue' : 'help')
+  const items = visibleItems.filter(item => item.kind === kind).sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+  const queuePath = `/operator/followups?kind=${kind}${filter === 'resolved' ? '&status=resolved' : ''}`
   const pair = state.pairs.find(item => item.id === selected?.pairId)
   const task = state.tasks.find(item => item.id === selected?.taskId)
   useEffect(() => { setResolution(''); setValidation(''); setOwnerId(selected?.ownerId || ''); setNextDate(''); setExtensionDate(''); setExtensionReason('') }, [selected?.id])
@@ -384,40 +391,45 @@ function FollowupQueue({ state, actor, notify, mode = 'demo' }: Props) {
     if (!selected) return
     if (resolution.trim().length < 4) { setValidation('请至少写 4 个字，记录采取了什么行动。'); return }
     const ok = await run(() => dispatch(actor.id, { type: 'resolve-followup', id: selected.id, note: resolution.trim(), nextFollowupAt }), '处理结果已保存，可以在已处理记录中查看。')
-    if (ok) setSearchParams({ status: 'open', result: 'resolved', last: selected.id }, { replace: true })
+    if (ok) setSearchParams({ kind, status: 'open', result: 'resolved', last: selected.id }, { replace: true })
   }
   async function assign() {
     if (!selected || !ownerId) return
     const ok = await run(() => dispatch(actor.id, { type: 'assign-followup', id: selected.id, ownerId, nextFollowupAt }), '负责人和下次跟进时间已保存。')
-    if (ok) setSearchParams({ status: filter, item: selected.id, result: 'assigned', last: selected.id }, { replace: true })
+    if (ok) setSearchParams({ kind, status: filter, item: selected.id, result: 'assigned', last: selected.id }, { replace: true })
   }
   async function reopen() {
     if (!selected || resolution.trim().length < 4) { setValidation('请至少写 4 个字，说明重新跟进的原因。'); return }
     const ok = await run(() => dispatch(actor.id, { type: 'reopen-followup', id: selected.id, note: resolution.trim(), nextFollowupAt }), '事项已重新打开。')
-    if (ok) setSearchParams({ status: 'open', result: 'reopened', last: selected.id }, { replace: true })
+    if (ok) setSearchParams({ kind, status: 'open', result: 'reopened', last: selected.id }, { replace: true })
   }
   async function extend() {
     if (!selected || !task || extensionReason.trim().length < 2 || !extensionDate) { setValidation('请选择新期限，并写明延期原因。'); return }
     const ok = await run(() => dispatch(actor.id, { type: 'extend-task', id: task.id, dueAt: new Date(`${extensionDate}T23:59:00+08:00`).toISOString(), reason: extensionReason.trim() }), '回应期限已顺延，原因已记录。')
-    if (ok) setSearchParams({ status: filter, item: selected.id, result: 'extended', last: selected.id }, { replace: true })
+    if (ok) setSearchParams({ kind, status: filter, item: selected.id, result: 'extended', last: selected.id }, { replace: true })
   }
-  const owners = state.people.filter(person => person.role === 'operator' && hasPermission(person, selected?.kind === 'help' ? 'safeguarding' : 'administration'))
+  const owners = state.people.filter(person => person.role === 'operator' && person.accountStatus !== 'disabled' && person.id !== selected?.reportedPersonId && hasPermission(person, selected?.kind === 'help' ? 'safeguarding' : 'administration'))
   const result = searchParams.get('result')
-  const resultItem = state.followups.find(item => item.id === searchParams.get('last'))
+  const resultItem = state.followups.find(item => item.id === searchParams.get('last') && canView(item))
   const resultOwner = state.people.find(person => person.id === (resultItem?.ownerId || ownerId))
   return <div className="stack">
-    {selected && <BackLink fallbackTo={`/operator/followups${filter === 'resolved' ? '?status=resolved' : ''}`} fallbackLabel={filter === 'resolved' ? '返回已处理记录' : '返回待跟进列表'} />}
+    {selected && <BackLink fallbackTo={queuePath} fallbackLabel={filter === 'resolved' ? '返回已处理记录' : kind === 'help' ? '返回保护求助' : '返回回应进度'} />}
+    {!selected && canHelp && canAdmin && <nav className="toolbar" aria-label="跟进事项类别">
+      <button type="button" className={`btn small ${kind === 'help' ? '' : 'secondary'}`} aria-pressed={kind === 'help'} onClick={() => setSearchParams({ kind: 'help', ...(filter === 'resolved' ? { status: 'resolved' } : {}) }, { replace: true })}>保护求助</button>
+      <button type="button" className={`btn small ${kind === 'overdue' ? '' : 'secondary'}`} aria-pressed={kind === 'overdue'} onClick={() => setSearchParams({ kind: 'overdue', ...(filter === 'resolved' ? { status: 'resolved' } : {}) }, { replace: true })}>回应进度</button>
+    </nav>}
     {!selected && <div className="toolbar">
-      <button type="button" className={`btn small ${filter === 'open' ? '' : 'secondary'}`} aria-pressed={filter === 'open'} onClick={() => setSearchParams({}, { replace: true })}>等待跟进</button>
-      <button type="button" className={`btn small ${filter === 'resolved' ? '' : 'secondary'}`} aria-pressed={filter === 'resolved'} onClick={() => setSearchParams({ status: 'resolved' }, { replace: true })}>已处理记录</button>
+      <button type="button" className={`btn small ${filter === 'open' ? '' : 'secondary'}`} aria-pressed={filter === 'open'} onClick={() => setSearchParams({ kind }, { replace: true })}>等待跟进</button>
+      <button type="button" className={`btn small ${filter === 'resolved' ? '' : 'secondary'}`} aria-pressed={filter === 'resolved'} onClick={() => setSearchParams({ kind, status: 'resolved' }, { replace: true })}>已处理记录</button>
     </div>}
-    {result && resultItem && <WorkflowOutcome title={result === 'resolved' ? '跟进结果已保存' : result === 'reopened' ? '事项已重新打开' : result === 'assigned' ? '负责人和下次时间已保存' : '回应期限已顺延'} status={resultItem.status === 'resolved' ? `已处理：${resultItem.resolution || '处理记录已保存。'}` : resultItem.ownerId ? `当前负责人：${resultOwner?.nickname || '已指定运营人员'}。` : '事项等待运营继续处理。'} next={result === 'resolved' ? '如果约定了下次联系，由指定运营按时继续跟进。' : '运营负责人继续处理，并记录下一步。'} to={result === 'resolved' ? '/operator/followups?status=resolved' : '/operator/followups'} actionLabel={result === 'resolved' ? '查看已处理记录' : '回到待跟进列表'} />}
+    {result && resultItem && resultItem.kind === kind && <WorkflowOutcome title={result === 'resolved' ? '跟进结果已保存' : result === 'reopened' ? '事项已重新打开' : result === 'assigned' ? '负责人和下次时间已保存' : '回应期限已顺延'} status={resultItem.status === 'resolved' ? `已处理：${resultItem.resolution || '处理记录已保存。'}` : resultItem.ownerId ? `当前负责人：${resultOwner?.nickname || '已指定运营人员'}。` : '事项等待运营继续处理。'} next={result === 'resolved' ? '如果约定了下次联系，由指定运营按时继续跟进。' : '运营负责人继续处理，并记录下一步。'} to={`/operator/followups?kind=${kind}${result === 'resolved' ? '&status=resolved' : ''}`} actionLabel={result === 'resolved' ? '查看已处理记录' : '回到待跟进列表'} />}
     <div className="operation-focus">
       {!selected && <section className="panel stack task-list">
-        <h2>{filter === 'open' ? '需要多一份留意' : '已经做过的照顾'}</h2>
-        {!items.length && <Empty title={filter === 'open' ? '目前没有待跟进事项' : '还没有处理记录'} description="求助与达到期限的回应任务会形成跟进事项。" />}
-        <div className="stack compact">{items.map(item => <button id={`operator-followup-${item.id}`} key={item.id} type="button" className="operation-letter-row letter-select" onClick={() => setSearchParams({ ...(filter === 'resolved' ? { status: 'resolved' } : {}), item: item.id }, { state: { returnContext: { to: filter === 'resolved' ? '/operator/followups?status=resolved' : '/operator/followups', label: filter === 'resolved' ? '返回已处理记录' : '返回待跟进列表', sourcePath: `${location.pathname}${location.search}`, sourceKey: location.key, focusId: `operator-followup-${item.id}`, historyBack: true } } })}>
-          <strong>{item.kind === 'help' ? '一份需要认真倾听的求助' : '书信回应进度'}</strong>
+        <h2>{kind === 'help' ? filter === 'open' ? '待处理的保护求助' : '已处理的保护求助' : filter === 'open' ? '待跟进的回应进度' : '已处理的回应进度'}</h2>
+        <p className="muted small-text">{kind === 'help' ? '仅供适格的保护处理者查看，求助正文不会进入普通逾期队列。' : '这里仅显示书信回应逾期事项。'}</p>
+        {!items.length && <Empty title={filter === 'open' ? kind === 'help' ? '目前没有待处理求助' : '目前没有待跟进的回应' : '还没有处理记录'} description={kind === 'help' ? '新的保护求助会在此单独显示。' : '达到回应期限的任务会在此形成进度事项。'} />}
+        <div className="stack compact">{items.map(item => <button id={`operator-followup-${item.id}`} key={item.id} type="button" className="operation-letter-row letter-select" onClick={() => setSearchParams({ kind, ...(filter === 'resolved' ? { status: 'resolved' } : {}), item: item.id }, { state: { returnContext: { to: queuePath, label: filter === 'resolved' ? '返回已处理记录' : kind === 'help' ? '返回保护求助' : '返回回应进度', sourcePath: `${location.pathname}${location.search}`, sourceKey: location.key, focusId: `operator-followup-${item.id}`, historyBack: true } } })}>
+          <strong>{kind === 'help' ? '一份需要认真倾听的求助' : '书信回应进度'}</strong>
           <span>{item.requesterId ? nameOf(state, item.requesterId) : nameOf(state, state.pairs.find(pair => pair.id === item.pairId)?.childId)}</span>
           <span className="letter-row-meta">{formatDate(item.createdAt)} · {item.status === 'resolved' ? '已处理' : '待跟进'}</span>
         </button>)}</div>
@@ -425,6 +437,7 @@ function FollowupQueue({ state, actor, notify, mode = 'demo' }: Props) {
       {selected && <section className="panel stack">
         <div className="section-title"><h2>{selected.kind === 'help' ? '先听听发生了什么' : '了解书信的进展'}</h2><Badge tone={selected.kind === 'help' ? 'warning' : undefined}>{selected.kind === 'help' ? '仅有求助权限的运营可见' : '回应待跟进'}</Badge></div>
         {pair && <p className="muted">{nameOf(state, pair.childId)} ↔ {nameOf(state, pair.volunteerId)} · {nameOf(state, pair.teacherId)} 协助</p>}
+        {selected.kind === 'help' && <p className="muted small-text">涉及对象：{selected.reportedParty === 'volunteer' ? '书信伙伴' : selected.reportedParty === 'teacher' ? '协助老师' : selected.reportedParty === 'operator' ? '运营人员' : selected.reportedParty === 'other' ? '其他／不方便说' : '未说明'}{selected.reportedPersonId ? ` · ${nameOf(state, selected.reportedPersonId)}` : ''}</p>}
         <div className="followup-note">{selected.note}</div>
         {task && <p>回应期限：{formatDate(task.dueAt)}；当前状态：{task.status === 'completed' ? '回应已完成' : task.status === 'review' ? '信件审核中' : pair?.status === 'paused' ? '陪伴暂停中' : '等待回应'}。</p>}
         {selected.kind === 'help' && <Notice>这是受限的求助记录。先理解表达，再安排合适的人处理；不要自动分享给被反映的人。</Notice>}
@@ -450,24 +463,24 @@ function FollowupQueue({ state, actor, notify, mode = 'demo' }: Props) {
 
 export function OperatorPage({ state, actor, mode = 'demo' }: Props) {
   if (actor.role !== 'operator') return <Empty title="这项任务需要运营身份" />
-  const canHelp = hasPermission(actor, 'safeguarding')
-  const canAdmin = hasPermission(actor, 'administration')
+  const canHelp = hasPermission(actor, 'safeguarding') && actor.accountStatus !== 'disabled'
+  const canAdmin = hasPermission(actor, 'administration') && actor.accountStatus !== 'disabled'
   const canReview = hasPermission(actor, 'review')
   if (!canHelp && !canAdmin && !canReview) return <Empty title="当前身份还没有运营任务权限" description="请联系管理员分配对应职责。" />
-  const help = canHelp ? state.followups.filter(item => item.kind === 'help' && item.status === 'open') : []
+  const help = canHelp ? state.followups.filter(item => item.kind === 'help' && item.status === 'open' && item.reportedPersonId !== actor.id) : []
   const overdue = canAdmin ? state.followups.filter(item => item.kind === 'overdue' && item.status === 'open') : []
   const reviews = canReview ? state.letters.filter(letter => letter.moderation === 'pending').sort((a, b) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt)) : []
   const unmatched = canAdmin ? state.people.filter(person => person.role === 'child' && !state.pairs.some(pair => pair.status !== 'ended' && pair.childId === person.id) && (mode === 'demo' || person.accountStatus === 'active' && person.guardianConsent && person.teacherId)) : []
   const priorities = [
-    ...(canHelp ? [{ key: 'help', label: '需要回应的求助', count: help.length, to: help[0] ? `/operator/followups?item=${encodeURIComponent(help[0].id)}` : '/operator/followups', queue: '/operator/followups', description: '受限记录，请先倾听并安排合适的负责人。' }] : []),
-    ...(canAdmin ? [{ key: 'overdue', label: '需要了解的逾期', count: overdue.length, to: overdue[0] ? `/operator/followups?item=${encodeURIComponent(overdue[0].id)}` : '/operator/followups', queue: '/operator/followups', description: '了解是否遇到困难，再决定延期或暂停。' }] : []),
+    ...(canHelp ? [{ key: 'help', label: '需要回应的求助', count: help.length, to: help[0] ? `/operator/followups?kind=help&item=${encodeURIComponent(help[0].id)}` : '/operator/followups?kind=help', queue: '/operator/followups?kind=help', description: '受限记录，请先倾听并安排合适的负责人。' }] : []),
+    ...(canAdmin ? [{ key: 'overdue', label: '需要了解的逾期', count: overdue.length, to: overdue[0] ? `/operator/followups?kind=overdue&item=${encodeURIComponent(overdue[0].id)}` : '/operator/followups?kind=overdue', queue: '/operator/followups?kind=overdue', description: '了解是否遇到困难，再决定延期或暂停。' }] : []),
     ...(canReview ? [{ key: 'review', label: '等待逐封审核', count: reviews.length, to: reviews[0] ? `/operator/review?letter=${encodeURIComponent(reviews[0].id)}` : '/operator/review', queue: '/operator/review', description: '阅读信件并决定通过或给出具体修改建议。' }] : []),
     ...(canAdmin ? [{ key: 'pair', label: '等待安排结对', count: unmatched.length, to: '/operator/pairs', queue: '/operator/pairs', description: '核对伙伴与协助老师，建立一段陪伴。' }] : []),
   ]
   const first = priorities.find(item => item.count > 0)
   return <div className="stack operations-page">
     <PageHeader eyebrow="运营待处理" title="照顾好每一次往来。" description="先看需要及时回应的事，再处理审核、结对与日常跟进。" />
-    {first ? <section className="operations-next panel stack"><p className="eyebrow">现在最需要处理</p><h2>{first.label}</h2><p className="muted">{first.description}</p><ContextLink className="btn" to={first.to} returnTo={first.queue} returnLabel={first.key === 'review' ? '返回待审核列表' : first.key === 'pair' ? '返回结对列表' : '返回待跟进列表'} historyBack={false}>查看并处理<ArrowRight size={17} aria-hidden="true" /></ContextLink></section>
+    {first ? <section className="operations-next panel stack"><p className="eyebrow">现在最需要处理</p><h2>{first.label}</h2><p className="muted">{first.description}</p><ContextLink className="btn" to={first.to} returnTo={first.queue} returnLabel={first.key === 'review' ? '返回待审核列表' : first.key === 'pair' ? '返回结对列表' : first.key === 'help' ? '返回保护求助' : '返回回应进度'} historyBack={false}>查看并处理<ArrowRight size={17} aria-hidden="true" /></ContextLink></section>
       : <section className="panel stack"><h2>眼下没有待处理事项</h2><p className="muted">新的求助、逾期、信件或待结对伙伴出现时，会在下面的列表中更新。</p></section>}
     <section className="stack" aria-label="运营任务分类"><h2>按优先顺序查看</h2><div className="operator-priority-list">{priorities.map(item => <Link className="operator-priority-item" key={item.key} to={item.queue}><span className="operator-priority-count">{item.count}</span><span><strong>{item.label}</strong><small>{item.description}</small></span><ArrowRight size={18} aria-hidden="true" /></Link>)}</div></section>
     {canHelp && canAdmin && <p className="muted small-text">求助记录只在具有求助处理权限的运营视图中显示，不会自动分享给被反映的人。</p>}
@@ -487,6 +500,6 @@ export function OperatorPairsPage(props: Props) {
 
 export function OperatorFollowupPage(props: Props) {
   const [searchParams] = useSearchParams()
-  if (props.actor.role !== 'operator' || !(hasPermission(props.actor, 'administration') || hasPermission(props.actor, 'safeguarding'))) return <Empty title="这项任务需要跟进权限" />
+  if (props.actor.role !== 'operator' || props.actor.accountStatus === 'disabled' || !(hasPermission(props.actor, 'administration') || hasPermission(props.actor, 'safeguarding'))) return <Empty title="这项任务需要跟进权限" />
   return <div className="stack operations-page">{!searchParams.has('item') && <BackLink fallbackTo="/space" fallbackLabel="返回运营待处理" />}<PageHeader eyebrow="持续跟进" title="先了解情况，再记录下一步。" description="求助记录仅向有相应职责的运营展示；回应逾期需要具体了解原因。" /><FollowupQueue {...props} /></div>
 }

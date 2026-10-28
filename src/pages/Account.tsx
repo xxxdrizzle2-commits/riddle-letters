@@ -54,9 +54,47 @@ export function ManageAccountsPage({actor,notify,mode='demo',state}:PageProps){
 }
 export function HelpPage({state,actor,notify=()=>{},mode='demo'}:Partial<PageProps>){
   const [body,setBody]=useState(''),[submitted,setSubmitted]=useState(false)
+  const [reportedParty,setReportedParty]=useState<''|'volunteer'|'teacher'|'operator'|'other'>('')
+  const [reportedPersonId,setReportedPersonId]=useState(''),[pairId,setPairId]=useState('')
   const {run,busy,error}=useAction(notify)
   const roleHome = actor?.role === 'volunteer' ? '陪伴任务' : actor?.role === 'teacher' ? '收发任务' : actor?.role === 'operator' ? '待处理' : '信箱'
-  async function submit(event:FormEvent){event.preventDefault();if(!actor)return;const ok=await run(async()=>{await dispatch(actor.id,{type:'help',pairId:state?.pairs.find(p=>p.childId===actor.id||p.volunteerId===actor.id)?.id,body});setBody('')},mode==='demo'?'演示求助已保存在当前浏览器，切换运营演示身份可查看。':'求助已提交，负责运营会在值守时段查看。');if(ok)setSubmitted(true)}
-  return <div className="container public-page"><BackLink fallbackTo={actor ? '/space' : '/choose'} fallbackLabel={actor ? `返回${roleHome}` : '返回身份入口'}/><PageHeader eyebrow="找人帮忙" title="有困难时，可以说出来。" description={mode==='demo'?'这里可以体验求助流程；演示留言不会发送给真实工作人员。':'写信、收发或登录遇到问题，都可以请工作人员协助。'}/>{submitted&&<Notice>求助已保存在此浏览器，当前状态为“等待跟进”。下一步由运营演示身份查看；不会通知真实工作人员。 <Link className="text-button" to="/demo/start/operator">切换到运营演示身份</Link></Notice>}<div className="account-grid"><section className="panel"><h2><HeartHandshake size={20}/> 告诉负责运营的人</h2>{actor?<form className="auth-form" onSubmit={submit}><div className="field"><label htmlFor="help-body">想说的话</label><textarea id="help-body" value={body} onChange={e=>setBody(e.target.value)} required minLength={2} maxLength={2000} placeholder="可以从“我希望得到什么帮助”写起。"/></div><button className="btn" disabled={busy||!body.trim()}>{busy?'正在提交…':'提交求助'}</button>{error&&<p role="alert" className="field-error">{error}</p>}</form>:<p>如果忘记登录卡，请联系负责你的老师协助重置。其他困难也可以在现实中告诉身边信任的大人。</p>}</section><aside className="panel"><h2>求助会怎样处理？</h2><ol className="journey"><li><span>1</span><p>{mode==='demo'?'演示求助只保存在当前浏览器，供运营演示身份查看。':'求助只进入有处理权限的运营待办，不会自动分享给伙伴或相关老师。'}</p></li><li><span>2</span><p>{mode==='demo'?'切换到运营演示身份，可以体验接手、记录和关闭事项。':'工作人员在项目公布的值守时段查看并记录处理进度。这里不是即时聊天。'}</p></li><li><span>3</span><p>需要马上获得帮助时，请直接告诉身边信任的大人。</p></li></ol></aside></div></div>
+  const relatedPairs = state?.pairs.filter(pair => actor && [pair.childId,pair.volunteerId,pair.teacherId].includes(actor.id)) ?? []
+  const relevantPersonIds = new Set(relatedPairs.filter(pair=>!pairId||pair.id===pairId).map(pair => reportedParty === 'volunteer' ? pair.volunteerId : pair.teacherId))
+  const relevantPeople = (reportedParty === 'volunteer' || reportedParty === 'teacher')
+    ? state?.people.filter(person => person.role === reportedParty && relevantPersonIds.has(person.id) && person.id !== actor?.id) ?? []
+    : []
+  async function submit(event:FormEvent){
+    event.preventDefault()
+    if(!actor || actor.role==='operator' || !reportedParty || reportedParty==='operator')return
+    const ok=await run(async()=>{
+      await dispatch(actor.id,{type:'help',pairId:pairId||undefined,reportedParty,reportedPersonId:reportedPersonId||undefined,body})
+      setBody('')
+    },mode==='demo'?'演示求助已保存在当前浏览器，不会通知真实工作人员。':'求助已记录在成年合成试测数据中，供有权限的试测账号查看。')
+    if(ok)setSubmitted(true)
+  }
+  return <div className="container public-page">
+    <BackLink fallbackTo={actor ? '/space' : '/choose'} fallbackLabel={actor ? `返回${roleHome}` : '返回身份入口'}/>
+    <PageHeader eyebrow="找人帮忙" title="有困难时，可以说出来。" description={mode==='demo'?'这里只体验合成数据的求助流程，不会通知真实工作人员。':'这里供成年参与者用合成身份试测求助流程，不提供正式儿童保护服务。'}/>
+    {submitted&&<Notice>{mode==='demo'?<>演示求助已保存在当前浏览器，可切换运营演示身份查看；不会通知真实工作人员。 <Link className="text-button" to="/demo/start/operator">切换演示身份</Link></>:'求助已记录在成年合成账号试测数据中，等待有保护权限的试测账号查看。这里不是实时求助渠道。'}</Notice>}
+    <div className="account-grid"><section className="panel stack">
+      <h2><HeartHandshake size={20}/> 说明遇到的问题</h2>
+      {actor?.role==='operator'?<Notice>运营人员需要通过独立于本账号的现实渠道反映问题；此处不受理运营账号的站内求助。</Notice>:actor?<form className="auth-form" onSubmit={submit}>
+        <div className="field"><label htmlFor="help-party">这件事主要与谁有关？</label><select id="help-party" value={reportedParty} required onChange={event=>{setReportedParty(event.target.value as typeof reportedParty);setReportedPersonId('');setPairId('');setSubmitted(false)}}>
+          <option value="" disabled>请先选择</option><option value="volunteer">书信伙伴</option><option value="teacher">协助老师</option><option value="operator">运营人员</option><option value="other">其他事情／暂时不方便说</option>
+        </select><p className="field-help">选择仅用于把求助交给合适的人，不会自动分享给被反映的人。</p></div>
+        {reportedParty==='operator'?<Notice tone="warning">当前成年合成试测没有可核实的独立运营投诉接手人，请勿在这里填写涉及运营人员的敏感内容。请在现实中联系学校指定负责人或项目负责人；若涉及正在发生的危险，及时向当地有关部门求助。真实试点开放前必须公布独立联系人和替补。</Notice>:reportedParty&&<>
+          {relevantPeople.length>0&&<div className="field"><label htmlFor="help-person">涉及哪位人员？（可不选）</label><select id="help-person" value={reportedPersonId} onChange={event=>setReportedPersonId(event.target.value)}><option value="">不确定或不方便选择</option>{relevantPeople.map(person=><option value={person.id} key={person.id}>{person.nickname}</option>)}</select></div>}
+          {relatedPairs.length>0&&<div className="field"><label htmlFor="help-pair">与哪组书信有关？（可不选）</label><select id="help-pair" value={pairId} onChange={event=>{setPairId(event.target.value);setReportedPersonId('')}}><option value="">不指定结对</option>{relatedPairs.map(pair=><option value={pair.id} key={pair.id}>{state?.people.find(person=>person.id===pair.childId)?.nickname??'小朋友'} ↔ {state?.people.find(person=>person.id===pair.volunteerId)?.nickname??'志愿者'}</option>)}</select></div>}
+          <div className="field"><label htmlFor="help-body">想说的话</label><textarea id="help-body" value={body} onChange={event=>setBody(event.target.value)} required minLength={2} maxLength={2000} placeholder="可以从“我希望得到什么帮助”写起。"/></div>
+          <button className="btn" disabled={busy||body.trim().length<2}>{busy?'正在提交…':mode==='demo'?'提交演示求助':'提交试测求助'}</button>{error&&<p role="alert" className="field-error">{error}</p>}
+        </>}
+      </form>:<p>如果无法登录，请在现实中联系负责老师或试测负责人。需要马上获得帮助时，请告诉身边信任的大人。</p>}
+    </section><aside className="panel"><h2>求助会怎样处理？</h2><ol className="journey"><li><span>1</span><p>{mode==='demo'?'演示求助只存于当前浏览器，切换演示身份可查看。':'站内求助仅供成年合成账号试测，按保护权限限制读取。'}</p></li><li><span>2</span><p>这里不是即时聊天，也没有已公布的正式值守时间；提交成功只代表记录已保存。</p></li><li><span>3</span><p>需要及时保护时，直接联系现实中信任的成年人或有权部门。</p></li></ol></aside></div>
+  </div>
 }
-export function PrivacyPage(){return <div className="container public-page"><PageHeader eyebrow="隐私说明" title="认真保护每一封信。" description="当前只有合成数据演示，正式试点尚未开放。"/><div className="panel stack" style={{maxWidth:800,margin:'0 auto'}}><Notice>当前演示仅使用虚构身份，书信保存在当前浏览器。请勿填写真实儿童的姓名、联系方式、照片或私人信件。以下是正式试点前需要完成的设计。</Notice><section><h2>正式试点计划记录什么</h2><p>孩子使用昵称与老师协助建立的登录账号；志愿者申请需要邮箱、学校或机构及参与时间；监护授权由工作人员记录可核对的编号。书信正文、手写图片、审核与投递记录用于完成陪伴流程。</p></section><section><h2>计划怎样控制访问</h2><p>孩子和志愿者只看自己的相关书信；负责老师处理实际收发；指定运营处理审核、结对与求助。公开故事仅使用虚构内容，不展示真实孩子的信件。</p></section><section><h2>参与者应有的选择</h2><p>正式试点应提供资料查阅、导出、撤回或删除申请。监护人可通过负责老师提出撤回，运营核对后停止参与并处理资料。</p></section><Notice>本页是功能规划，尚未填入项目负责人的联系方式、值守时段、资料保存期限和正式监护告知材料。接入云服务本身不代表可以邀请真实未成年人参与。</Notice><Link className="btn secondary" to="/">回到身份入口</Link></div></div>}
+export function PrivacyPage(){return <div className="container public-page"><PageHeader eyebrow="隐私说明" title="认真保护每一封信。" description="当前仅供成年人使用合成身份和内容演示，正式儿童试点尚未开放。"/><div className="panel stack" style={{maxWidth:800,margin:'0 auto'}}>
+  <Notice>{cloudConfigured?'当前 V3 站点使用预置的成年合成试测账号；书信和操作记录经云端服务保存在试测数据库，由有权限的试测账号共享。':'当前 V2 演示使用虚构身份；书信和操作记录保存在此浏览器。'} 请勿输入真实儿童的姓名、联系方式、照片或私人信件。</Notice>
+  <section><h2>两个演示环境的数据范围</h2><p>V2 Demo 在当前浏览器保存合成数据；V3 成年账号试测使用独立的 Cloudflare Pages Functions 与 D1 数据库。两者不共用业务数据。云端试测并不表示可以处理真实儿童资料。</p></section>
+  <section><h2>真实儿童试点前须确认</h2><p>学校与平台需明确数据处理责任、监护告知与儿童意愿、人员的最小访问范围、保存和删除期限、独立求助渠道及云服务数据流向。儿童纸信的拍摄、识别和例行审阅还需由合作学校与法律专业人员确认合法路径；当前未开放手写图片和 OCR。</p></section>
+  <section><h2>参与者的选择</h2><p>正式试点应提供资料查阅、撤回和删除申请，并在参与前说明每种资料的用途与可见人员。公开故事仅使用虚构内容。</p></section>
+  <Notice>本页说明现有演示与待办事项。项目尚未公布正式儿童试点的负责人联系方式、值守时段、资料保存期限和监护告知材料。</Notice><Link className="btn secondary" to="/">回到身份入口</Link></div></div>}

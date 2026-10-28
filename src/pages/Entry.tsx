@@ -14,7 +14,7 @@ export const spaceNames: Record<Role, string> = {
 const roles = [
   { role: 'child', title: '我是小朋友', description: '写一封信，读伙伴寄来的故事', icon: Mail, tone: '' },
   { role: 'volunteer', title: '我是志愿者', description: '认真回应，分享日常小发现', icon: Feather, tone: 'honey' },
-  { role: 'teacher', title: '我是老师', description: '帮助打印、交付和回传书信', icon: BookOpen, tone: 'sage' },
+  { role: 'teacher', title: '我是老师', description: '协调学校侧参与，协助纸信收发与保护', icon: BookOpen, tone: 'sage' },
   { role: 'operator', title: '我是运营人员', description: '安排结对、审核和持续跟进', icon: ShieldCheck, tone: 'peach' },
 ] as const
 

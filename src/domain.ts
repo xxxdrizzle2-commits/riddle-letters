@@ -68,6 +68,8 @@ function ensure(condition: unknown, message: string, code: DomainErrorCode = 'IN
 const uid = (prefix: string) => `${prefix}-${crypto.randomUUID()}`
 const addDays = (iso: string, days: number) => new Date(Date.parse(iso) + days * DAY).toISOString()
 export const hasPermission = (actor: Person, permission: NonNullable<Person['permissions']>[number]) => actor.role === 'operator' && (!actor.permissions || actor.permissions.includes(permission))
+const canHandleHelp = (actor: Person, followup: AppState['followups'][number]) =>
+  hasPermission(actor, 'safeguarding') && actor.accountStatus !== 'disabled' && followup.reportedPersonId !== actor.id
 
 export function formatDate(iso: string): string {
   return new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', timeZone: 'Asia/Shanghai' }).format(new Date(iso))
@@ -127,10 +129,10 @@ export function scopeState(previous: AppState, actorId: string): AppState {
   const operator = actor.role === 'operator'
   const administered = hasPermission(actor, 'administration')
   const reviewPairs = new Set(hasPermission(actor, 'review') ? state.letters.filter(l => l.moderation !== 'draft').map(l => l.pairId) : [])
-  const helpPairs = new Set(hasPermission(actor, 'safeguarding') ? state.followups.filter(f => f.kind === 'help').map(f => f.pairId) : [])
+  const helpPairs = new Set(state.followups.filter(f => f.kind === 'help' && canHandleHelp(actor, f)).map(f => f.pairId))
   state.pairs = state.pairs.filter(p => administered || reviewPairs.has(p.id) || helpPairs.has(p.id) || (!operator && (p.childId === actorId || p.volunteerId === actorId || p.teacherId === actorId)))
   const relatedIds = new Set([actorId, ...state.pairs.flatMap(p => [p.childId, p.volunteerId, p.teacherId])])
-  state.people = state.people.filter(p => administered || relatedIds.has(p.id) || (actor.role === 'teacher' && p.teacherId === actorId) || (hasPermission(actor, 'safeguarding') && state.followups.some(f => f.kind === 'help' && f.requesterId === p.id)))
+  state.people = state.people.filter(p => administered || relatedIds.has(p.id) || (actor.role === 'teacher' && p.teacherId === actorId) || state.followups.some(f => f.kind === 'help' && f.requesterId === p.id && canHandleHelp(actor, f)))
   state.letters = visibleLetters(state, actor).map(letter => {
     if (letter.authorId === actorId || letter.createdBy === actorId || hasPermission(actor, 'review')) return letter
     return { ...letter, submissionVersions: [], moderationNote: undefined, coveredLetterIds: [] }
@@ -140,7 +142,7 @@ export function scopeState(previous: AppState, actorId: string): AppState {
   state.deliveries = state.deliveries.filter(d => letterIds.has(d.letterId))
   state.tasks = state.tasks.filter(t => pairIds.has(t.pairId) && (administered || t.recipientId === actorId || (actor.role === 'teacher' && state.pairs.some(p => p.id === t.pairId && p.channel === 'paper' && t.recipientId === p.childId))))
   state.reviews = state.reviews.filter(r => state.letters.some(l => l.id === r.letterId && (l.authorId === actorId || l.createdBy === actorId || hasPermission(actor, 'review'))))
-  state.followups = state.followups.filter(f => f.kind === 'help' ? f.requesterId === actorId || hasPermission(actor, 'safeguarding') : operator && hasPermission(actor, 'administration'))
+  state.followups = state.followups.filter(f => f.kind === 'help' ? f.requesterId === actorId || canHandleHelp(actor, f) : operator && hasPermission(actor, 'administration'))
   const attachmentIds = new Set(state.letters.flatMap(l => [l.attachmentId, ...(l.submissionVersions ?? []).map(v => v.attachmentId)]).filter(Boolean))
   state.attachments = state.attachments.filter(a => attachmentIds.has(a.id))
   return state
@@ -398,10 +400,20 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
     }
     case 'help': {
       ensure(actor.role !== 'operator', '运营人员请在跟进事项中记录处理情况。', 'FORBIDDEN')
-      ensure(command.body.trim().length >= 2 && command.body.length <= 2000, '请写下 2—2000 字的想法。')
-      const pair = command.pairId ? pairById(command.pairId) : state.pairs.find(p => p.status !== 'ended' && (p.childId === actor.id || p.volunteerId === actor.id))
+      ensure(typeof command.body === 'string' && command.body.trim().length >= 2 && command.body.length <= 2000, '请写下 2—2000 字的想法。')
+      const reportedParty = command.reportedParty ?? 'other'
+      ensure(['volunteer', 'teacher', 'operator', 'other'].includes(reportedParty), '请选择求助涉及的对象。')
+      const pair = command.pairId ? pairById(command.pairId) : undefined
       ensure(!pair || [pair.childId, pair.volunteerId, pair.teacherId].includes(actor.id), '请选择自己的书信伙伴。', 'FORBIDDEN')
-      state.followups.push({ id: uid('help'), pairId: pair?.id, requesterId: actor.id, ownerId: state.people.find(p => hasPermission(p, 'safeguarding'))?.id, kind: 'help', status: 'open', note: `${actor.nickname}：${command.body.trim()}`, createdAt: state.clock, updatedAt: state.clock, history: [] })
+      const reportedPerson = command.reportedPersonId ? state.people.find(p => p.id === command.reportedPersonId) : undefined
+      if (command.reportedPersonId) {
+        ensure(reportedPerson && reportedParty !== 'other' && reportedPerson.role === reportedParty, '被反映人员与所选身份不一致。')
+        if (reportedParty !== 'operator') ensure(state.pairs.some(p => [p.childId, p.volunteerId, p.teacherId].includes(actor.id) && [p.childId, p.volunteerId, p.teacherId].includes(reportedPerson.id)), '请选择与你有关的人员。', 'FORBIDDEN')
+      }
+      ensure(reportedParty !== 'operator' || reportedPerson, '当前没有独立的站内运营投诉渠道，请联系学校或项目指定负责人。')
+      const owner = state.people.find(p => hasPermission(p, 'safeguarding') && p.accountStatus !== 'disabled' && p.id !== reportedPerson?.id)
+      ensure(owner, '当前没有可独立接手的保护人员，请联系学校或项目指定负责人。')
+      state.followups.push({ id: uid('help'), pairId: pair?.id, requesterId: actor.id, ownerId: owner.id, kind: 'help', status: 'open', note: `${actor.nickname}：${command.body.trim()}`, reportedParty, reportedPersonId: reportedPerson?.id, createdAt: state.clock, updatedAt: state.clock, history: [] })
       break
     }
     case 'resolve-followup':
@@ -409,8 +421,9 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
     case 'reopen-followup': {
       const followup = state.followups.find(f => f.id === command.id)
       ensure(followup, '这条跟进事项不存在。'); operator(followup.kind === 'help' ? 'safeguarding' : 'administration')
+      if (followup.kind === 'help') ensure(canHandleHelp(actor, followup), '被反映人不能接手或处理这条求助。', 'FORBIDDEN')
       if (command.nextFollowupAt) ensure(Number.isFinite(Date.parse(command.nextFollowupAt)) && Date.parse(command.nextFollowupAt) > Date.parse(state.clock), '下次跟进时间应晚于现在。')
-      if (command.type === 'assign-followup') { ensure(state.people.some(p => p.id === command.ownerId && hasPermission(p, followup.kind === 'help' ? 'safeguarding' : 'administration')), '请选择有处理权限的运营人员。'); followup.ownerId = command.ownerId }
+      if (command.type === 'assign-followup') { ensure(state.people.some(p => p.id === command.ownerId && p.accountStatus !== 'disabled' && (followup.kind === 'help' ? canHandleHelp(p, followup) : hasPermission(p, 'administration'))), '请选择有处理权限且无需回避的运营人员。'); followup.ownerId = command.ownerId }
       else { ensure(command.note.trim().length >= 3 && command.note.length <= 2000, '请记录至少 3 字的处理情况。'); followup.status = command.type === 'resolve-followup' ? 'resolved' : 'open'; followup.resolution = command.type === 'resolve-followup' ? command.note.trim() : undefined; (followup.history ??= []).push({ at: state.clock, actorId: actor.id, note: command.note.trim() }) }
       followup.nextFollowupAt = command.nextFollowupAt ?? (followup.kind === 'overdue' && command.type === 'resolve-followup' ? addDays(state.clock, 3) : followup.nextFollowupAt)
       followup.updatedAt = state.clock
