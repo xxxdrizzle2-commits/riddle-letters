@@ -15,6 +15,8 @@ V3 的主要路径是结对、双方写信、人工审核、线上或老师协�
 
 V3 网页外壳可直接打开，进入角色后仍须用试测账号登录；当前不依赖 Cloudflare Access 作为使用者登录步骤。账号资料保存在仓库外，禁止提交密码、会话或真实儿童资料。试测只使用虚构人物和合成书信；真实儿童接入、监护授权及正式运营不属于当前 MVP。
 
+第一增量的业务与法律边界见[业务与儿童保护边界](./docs/业务与儿童保护边界-第一阶段.md)。Cloudflare Pages 项目 `riddle-letters-v3` 的生产分支为 `dev`；Preview 使用独立的 `riddle-letters-v3-business-preview` D1，不能把生产 D1 作为 Preview 测试库。`wrangler.v3-preview.jsonc` 是本地开发配置，其 `name` 不是 Pages 项目名；部署前仍须核对 Pages 项目、环境绑定及目标分支。V2 项目 `riddle-letters` 不参与 V3 Preview 部署。
+
 ## 本地运行
 
 需要 Node.js 24 和 npm，使用仓库锁文件安装依赖：
