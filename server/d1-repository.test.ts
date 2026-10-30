@@ -39,6 +39,7 @@ function freshDatabase() {
   db.exec(readFileSync('migrations/0001_v3_core.sql', 'utf8'))
   db.exec(readFileSync('migrations/0002_v3_reply_task_letter_index.sql', 'utf8'))
   db.exec(readFileSync('migrations/0003_business_safety.sql', 'utf8'))
+  db.exec(readFileSync('migrations/0004_safeguarding_closed_loop.sql', 'utf8'))
   return db
 }
 
@@ -81,6 +82,7 @@ describe('V3 D1 repository', () => {
         ]
         store.state.people = people
         store.state.pairs = [{ id: 'pair-1', childId: 'child-1', volunteerId: 'volunteer-1', teacherId: 'teacher-1', channel: 'online', status: 'active', startedAt: '2026-10-01T09:00:00.000Z', pauseHistory: [] }]
+        store.state.trainingRecords = [{ id: 'training-volunteer-1', volunteerId: 'volunteer-1', version: '2026-10-v1', completedAt: '2026-10-01T09:00:00.000Z' }]
         for (const person of people) {
           const permissions = person.role === 'operator' ? ['moderate', 'followup', 'help', 'accounts', 'privacy'] : []
           store.accounts[person.id] = { uid: person.id, role: person.role, status: 'active', permissions, createdAt: '2026-10-01T09:00:00.000Z' }

@@ -33,6 +33,15 @@ const specs: Record<string, TableSpec> = {
   manuscriptAssets: { table: 'app_manuscript_assets', primaryColumns: ['id'] },
   ocrRuns: { table: 'app_ocr_runs', primaryColumns: ['id'] },
   attachments: { table: 'app_attachments', primaryColumns: ['id'] },
+  schoolAuthorities: { table: 'app_school_authorities', primaryColumns: ['id'] },
+  accessGrants: { table: 'app_access_grants', primaryColumns: ['id'] },
+  evidenceSnapshots: { table: 'app_evidence_snapshots', primaryColumns: ['id'] },
+  riskSignals: { table: 'app_risk_signals', primaryColumns: ['id'] },
+  disputeCases: { table: 'app_dispute_cases', primaryColumns: ['id'] },
+  supportTasks: { table: 'app_support_tasks', primaryColumns: ['id'] },
+  dutyShifts: { table: 'app_duty_shifts', primaryColumns: ['id'] },
+  trainingRecords: { table: 'app_training_records', primaryColumns: ['id'] },
+  planPolicies: { table: 'app_plan_policies', primaryColumns: ['id'] },
   receipts: { table: 'app_receipts', primaryColumns: ['actor_id', 'request_id'] },
   audit: { table: 'app_audit_events', primaryColumns: ['id'] },
   accessAudit: { table: 'app_access_audit_events', primaryColumns: ['id'] },
@@ -84,7 +93,16 @@ function recordsFor(store: Store): Record<string, Map<string, Row>> {
     return { actor_id: actorId, request_id: requestId, payload_hash: item.value.hash, result_id: item.value.resultId, created_at: item.value.at }
   })
   simple('audit', store.audit, item => item.id, item => ({ id: item.id, actor_id: item.actorId, action: item.action, target_id: item.targetId ?? null, created_at: item.at }))
-  simple('accessAudit', store.accessAudit, item => item.id, item => ({ id: item.id, actor_id: item.actorId, target_type: item.targetType, target_id: item.targetId, decision: item.decision, created_at: item.at, data_json: json(item) }))
+  simple('accessAudit', store.accessAudit, item => item.id, item => ({ id: item.id, actor_id: item.actorId, target_type: item.targetType, target_id: item.targetId, decision: item.decision, created_at: item.at, grant_id: item.grantId ?? null, severity: item.severity ?? null, reason_code: item.reasonCode ?? null, data_json: json(item) }))
+  simple('schoolAuthorities', store.state.schoolAuthorities ?? [], item => item.id, item => ({ id: item.id, school_id: item.schoolId, user_id: item.userId, kind: item.kind, backup_user_id: item.backupUserId ?? null, starts_at: item.startsAt, ends_at: item.endsAt ?? null, revoked_at: item.revokedAt ?? null, approved_by: item.approvedBy, data_json: json(item) }))
+  simple('accessGrants', store.state.accessGrants ?? [], item => item.id, item => ({ id: item.id, actor_id: item.actorId, target_type: item.targetType, target_id: item.targetId, purpose: item.purpose, granted_by: item.grantedBy, approved_by: item.approvedBy ?? null, starts_at: item.startsAt, expires_at: item.expiresAt, emergency: item.emergency ? 1 : 0, review_due_at: item.reviewDueAt ?? null, reviewed_at: item.reviewedAt ?? null, revoked_at: item.revokedAt ?? null, data_json: json(item) }))
+  simple('evidenceSnapshots', store.state.evidenceSnapshots ?? [], item => item.id, item => ({ id: item.id, case_id: item.caseId ?? null, letter_id: item.letterId ?? null, version_id: item.versionId ?? null, attachment_id: item.attachmentId ?? null, digest: item.digest, captured_by: item.capturedBy, captured_at: item.capturedAt, data_json: json(item) }))
+  simple('riskSignals', store.state.riskSignals ?? [], item => item.id, item => ({ id: item.id, volunteer_id: item.volunteerId, kind: item.kind, severity: item.severity, status: item.status, created_at: item.createdAt, data_json: json(item) }))
+  simple('disputeCases', store.state.disputeCases ?? [], item => item.id, item => ({ id: item.id, school_id: item.schoolId, topic: item.topic, pair_id: item.pairId ?? null, opened_by: item.openedBy, opened_at: item.openedAt, status: item.status, data_json: json(item) }))
+  simple('supportTasks', store.state.supportTasks ?? [], item => item.id, item => ({ id: item.id, child_id: item.childId, case_id: item.caseId ?? null, pair_id: item.pairId ?? null, owner_teacher_id: item.ownerTeacherId ?? null, due_at: item.dueAt, status: item.status, data_json: json(item) }))
+  simple('dutyShifts', store.state.dutyShifts ?? [], item => item.id, item => ({ id: item.id, scope: item.scope, school_id: item.schoolId ?? null, user_id: item.userId, backup_user_id: item.backupUserId ?? null, starts_at: item.startsAt, ends_at: item.endsAt, data_json: json(item) }))
+  simple('trainingRecords', store.state.trainingRecords ?? [], item => item.id, item => ({ id: item.id, volunteer_id: item.volunteerId, version: item.version, completed_at: item.completedAt, data_json: json(item) }))
+  simple('planPolicies', store.state.planPolicies ?? [], item => item.id, item => ({ id: item.id, child_max_active_pairs: item.childMaxActivePairs, volunteer_max_active_pairs: item.volunteerMaxActivePairs, new_pair_cooldown_days: item.newPairCooldownDays, data_json: json(item) }))
   simple('rates', Object.entries(store.rates).map(([rateKey, value]) => ({ rateKey, ...value })), item => item.rateKey, item => ({ rate_key: item.rateKey, minute: item.minute, count: item.count }))
   return result
 }
@@ -138,6 +156,15 @@ export class D1Repository implements Repository {
     store.state.manuscriptAssets = list<NonNullable<Store['state']['manuscriptAssets']>[number]>('manuscriptAssets')
     store.state.ocrRuns = list<NonNullable<Store['state']['ocrRuns']>[number]>('ocrRuns')
     store.state.attachments = list<Store['state']['attachments'][number]>('attachments')
+    store.state.schoolAuthorities = list<NonNullable<Store['state']['schoolAuthorities']>[number]>('schoolAuthorities')
+    store.state.accessGrants = list<NonNullable<Store['state']['accessGrants']>[number]>('accessGrants')
+    store.state.evidenceSnapshots = list<NonNullable<Store['state']['evidenceSnapshots']>[number]>('evidenceSnapshots')
+    store.state.riskSignals = list<NonNullable<Store['state']['riskSignals']>[number]>('riskSignals')
+    store.state.disputeCases = list<NonNullable<Store['state']['disputeCases']>[number]>('disputeCases')
+    store.state.supportTasks = list<NonNullable<Store['state']['supportTasks']>[number]>('supportTasks')
+    store.state.dutyShifts = list<NonNullable<Store['state']['dutyShifts']>[number]>('dutyShifts')
+    store.state.trainingRecords = list<NonNullable<Store['state']['trainingRecords']>[number]>('trainingRecords')
+    store.state.planPolicies = list<NonNullable<Store['state']['planPolicies']>[number]>('planPolicies')
     store.receipts = Object.fromEntries((tables.receipts ?? []).map(row => [`${row.actor_id}:${row.request_id}`, { hash: String(row.payload_hash), resultId: String(row.result_id), at: String(row.created_at) }]))
     store.audit = (tables.audit ?? []).map(row => ({ id: String(row.id), actorId: String(row.actor_id), action: String(row.action), targetId: row.target_id == null ? undefined : String(row.target_id), at: String(row.created_at) }))
     store.accessAudit = list<Store['accessAudit'][number]>('accessAudit')

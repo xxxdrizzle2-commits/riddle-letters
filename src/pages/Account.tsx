@@ -90,7 +90,7 @@ export function HelpPage({state,actor,notify=()=>{},mode='demo'}:Partial<PagePro
           <button className="btn" disabled={busy||body.trim().length<2}>{busy?'正在提交…':mode==='demo'?'提交到演示受限队列':'提交到试测受限队列'}</button>{error&&<p role="alert" className="field-error">{error}</p>}
         </>}
       </form>:<p>如果无法登录，请在现实中联系负责老师或试测负责人。需要马上获得帮助时，请告诉身边信任的大人。</p>}
-    </section><aside className="panel"><h2>求助会怎样处理？</h2><ol className="journey"><li><span>1</span><p>{mode==='demo'?'演示求助只存于当前浏览器，切换演示身份可查看。':'站内求助仅供成年合成账号试测，按保护权限限制读取。'}</p></li><li><span>2</span><p>这里不是即时聊天，也没有已公布的正式值守时间；提交成功只代表记录已保存。</p></li><li><span>3</span><p>需要及时保护时，直接联系现实中信任的成年人或有权部门。</p></li></ol></aside></div>
+    </section><aside className="panel"><h2>求助会怎样处理？</h2><ol className="journey"><li><span>1</span><p>{mode==='demo'?'演示求助只存于当前浏览器，切换演示身份可查看。':'站内求助仅供成年合成账号试测，按保护权限限制读取。'}</p></li><li><span>2</span><p>这里不是即时聊天，也没有已公布的正式值守时间；提交成功只代表记录已保存。</p></li><li><span>3</span><p>需要及时保护时，直接联系现实中信任的成年人或有权部门。</p></li></ol><section className="stack" aria-label="谁会看到与线下求助人"><h2>谁会看到，多久回应</h2><ul className="journey"><li><span>看</span><p>只有未涉事的独立保护运营身份能看到全文；普通审核队列和被反映的人看不到。</p></li><li><span>时</span><p>按平台值班时段处理。当前合成演示没有真实值守，因此不承诺具体回应时限。</p></li><li><span>校</span><p>校内线下求助人是学校负责人及其替补；真实试点前需由学校书面确认姓名与联系方式。</p></li></ul></section></aside></div>
   </div>
 }
 export function PrivacyPage(){return <div className="container public-page"><PageHeader eyebrow="隐私说明" title="认真保护每一封信。" description="当前仅供成年人使用合成身份和内容演示，正式儿童试点尚未开放。"/><div className="panel stack" style={{maxWidth:800,margin:'0 auto'}}>

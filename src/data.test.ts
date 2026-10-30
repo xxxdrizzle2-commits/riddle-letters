@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { canReadLetter, createSeedState, groupedResponseTasks, hasTeacherScope, isOverdue, normalizeState, reduceCommand, refreshState, scopeState, validateAttachment } from './domain'
+import { checkInvariants } from './invariants'
 import type { AppState, Command } from './types'
 
 const run = (state: AppState, actor: string, command: Command) => reduceCommand(state, actor, command)
@@ -192,11 +193,9 @@ describe('N:N 结对、学校授权与保护性暂停', () => {
 
   it('单 Pair 暂停不影响其他伙伴，可信志愿者风险会暂停其全部活跃 Pair', () => {
     let state = seed()
-    state = run(state, 'op1', { type: 'match', childId: 'c2', volunteerId: 'v1', teacherId: 't2', channel: 'online' })
-    const other = state.pairs.find(pair => pair.childId === 'c2' && pair.volunteerId === 'v1')!
     state = run(state, 'op1', { type: 'pause-pair', id: 'p1', reason: '单组调整' })
     expect(state.pairs.find(pair => pair.id === 'p1')!.status).toBe('paused')
-    expect(state.pairs.find(pair => pair.id === other.id)!.status).toBe('active')
+    expect(state.pairs.find(pair => pair.id === 'p3')!.status).toBe('active')
     state = run(state, 'op1', { type: 'resume-pair', id: 'p1' })
     state = run(state, 'op1', { type: 'pause-volunteer', volunteerId: 'v1', reason: '跨结对可信风险待保护岗核实' })
     expect(state.pairs.filter(pair => pair.volunteerId === 'v1').every(pair => pair.status === 'paused')).toBe(true)
@@ -257,7 +256,7 @@ describe('正式权限与受限求助', () => {
     state.people.find(p => p.id === 'c3')!.teacherId = 't1'
     expect(() => reduceCommand(state, 'op1', match, { formal: true })).toThrow('审核')
     state.people.find(p => p.id === 'v3')!.volunteerApproved = true
-    expect(reduceCommand(state, 'op1', match, { formal: true }).pairs).toHaveLength(3)
+    expect(reduceCommand(state, 'op1', match, { formal: true }).pairs).toHaveLength(5)
     expect(() => reduceCommand(state, 'op1', { type: 'set-clock', value: state.clock }, { formal: true })).toThrow('服务端时间')
   })
   it('老师正式代录必须有孩子核对确认，不能读取其他孩子草稿', () => {
@@ -291,7 +290,7 @@ describe('正式权限与受限求助', () => {
   })
   it('求助成为独立保护个案，只对申请人和未涉事处理人可见', () => {
     let state = run(seed(), 'c1', { type: 'help', pairId: 'p1', body: '有件事情想私下和运营说。', reportedParty: 'teacher', reportedPersonId: 't1' })
-    const help = state.helpCases![0]
+    const help = state.helpCases!.at(-1)!
     expect(help.requesterId).toBe('c1')
     expect(help.reportedPersonId).toBe('t1')
     expect(help.excludedActorIds).toContain('t1')
@@ -305,18 +304,18 @@ describe('正式权限与受限求助', () => {
   it('无结对求助不会默认关联第一组，伪造他人结对或被反映人身份会被拒绝', () => {
     const state = seed()
     const helped = run(state, 'c1', { type: 'help', body: '我需要帮助。', reportedParty: 'other' })
-    expect(helped.helpCases?.[0].pairId).toBeUndefined()
-    expect(helped.helpCases?.[0].ownerId).toBe('op1')
+    expect(helped.helpCases?.at(-1)?.pairId).toBeUndefined()
+    expect(helped.helpCases?.at(-1)?.ownerId).toBe('op1')
     expect(() => run(state, 'c1', { type: 'help', pairId: 'p2', body: '我需要帮助。', reportedParty: 'other' })).toThrow('自己的书信伙伴')
     expect(() => run(state, 'c1', { type: 'help', body: '我需要帮助。', reportedParty: 'teacher', reportedPersonId: 't2' })).toThrow('与你有关')
   })
   it('举报运营可不知道姓名；普通运营绕开，独立人员才能处理', () => {
     const state = seed()
     const named = run(state, 'c1', { type: 'help', body: '想反映普通运营。', reportedParty: 'operator', reportedPersonId: 'op1' })
-    expect(named.helpCases?.[0].excludedActorIds).toContain('op1')
+    expect(named.helpCases?.at(-1)?.excludedActorIds).toContain('op1')
     expect(scopeState(named, 'op1').helpCases).toHaveLength(0)
     const helped = run(state, 'c1', { type: 'help', body: '想反映一位运营人员，但不知道姓名。', reportedParty: 'operator' })
-    const help = helped.helpCases![0]
+    const help = helped.helpCases!.at(-1)!
     expect(help.ownerId).toBe('op2')
     expect(scopeState(helped, 'op1').helpCases).toHaveLength(0)
     expect(scopeState(helped, 'op2').helpCases?.some(item => item.id === help.id)).toBe(true)
@@ -330,18 +329,18 @@ describe('正式权限与受限求助', () => {
     expect(() => run(state, 'c1', { type: 'help', body: '想反映一位运营人员。', reportedParty: 'operator', reportedPersonId: 'op1' })).toThrow('没有可独立接手')
     state.people.find(p => p.id === 'op1')!.permissions = ['administration']
     expect(() => run(state, 'c1', { type: 'help', body: '我需要帮助。', reportedParty: 'other' })).toThrow('没有可独立接手')
-    expect(state.helpCases).toHaveLength(0)
+    expect(state.helpCases).toHaveLength(1)
   })
   it('不知道涉事老师姓名时不把个案正文交给任何老师，结案后原处理人撤权', () => {
     const opened = run(seed(), 'c1', { type: 'help', body: '想反映一位老师，但不知道姓名。', reportedParty: 'teacher' })
-    const item = opened.helpCases![0]
+    const item = opened.helpCases!.at(-1)!
     expect(item.schoolOwnerId).toBeUndefined()
-    const requesterView = scopeState(opened, 'c1').helpCases![0]
+    const requesterView = scopeState(opened, 'c1').helpCases!.find(entry => entry.id === item.id)!
     expect(requesterView).toMatchObject({ body: '想反映一位老师，但不知道姓名。', ownerId: '', history: [] })
     expect(requesterView.backupOwnerId).toBeUndefined()
     const resolved = run(opened, item.ownerId, { type: 'resolve-help-case', id: item.id, note: '已由独立人员处理并安排后续支持。' })
     expect(scopeState(resolved, item.ownerId).helpCases).toHaveLength(0)
-    const resolvedRequesterView = scopeState(resolved, 'c1').helpCases![0]
+    const resolvedRequesterView = scopeState(resolved, 'c1').helpCases!.find(entry => entry.id === item.id)!
     expect(resolvedRequesterView).toMatchObject({ status: 'resolved', history: [], ownerId: '' })
     expect(resolvedRequesterView).not.toHaveProperty('resolution')
   })
@@ -392,5 +391,92 @@ describe('附件边界', () => {
     state = write(state, 'v1', 'with-file', { removeAttachment: true })
     expect(state.attachments.some(a => a.id === 'asset')).toBe(true)
     expect(state.letters.find(l => l.id === 'with-file')!.submissionVersions![0].attachmentId).toBe('asset')
+  })
+})
+
+describe('业务与保护闭环', () => {
+  it('孩子同时最多两组结对，超出容量被拒且不改变状态', () => {
+    const state = seed()
+    expect(state.pairs.filter(pair => pair.status !== 'ended')).toHaveLength(4)
+    const before = structuredClone(state)
+    expect(() => run(state, 'op1', { type: 'match', childId: 'c1', volunteerId: 'v3', teacherId: 't1', channel: 'online' })).toThrow('同一名孩子同时最多 2 组')
+    expect(state).toEqual(before)
+  })
+  it('没有在任学校负责人时，敏感授权被阻断并给出具体原因', () => {
+    const state = seed()
+    state.schoolAuthorities = []
+    const before = state.accessGrants!.length
+    const expiresAt = new Date(Date.parse(state.clock) + 3_600_000).toISOString()
+    expect(() => run(state, 't1', { type: 'grant-access', userId: 't1', targetType: 'letter', targetId: 'l1', purpose: 'safeguarding-case', reason: '需要核对个案关联的来信。', expiresAt })).toThrow('只有学校负责人')
+    expect(state.accessGrants).toHaveLength(before)
+  })
+  it('紧急破窗只作用于单个对象、两小时失效，未复核前拒绝第二次', () => {
+    let state = seed()
+    state = run(state, 'op1', { type: 'open-emergency-access', targetType: 'letter', targetId: 'l1', reason: '合成演练：来信出现紧急风险线索，需要立即核实。' })
+    const grant = state.accessGrants!.at(-1)!
+    expect(grant).toMatchObject({ targetType: 'letter', targetId: 'l1', emergency: true })
+    expect(Date.parse(grant.expiresAt) - Date.parse(state.clock)).toBeLessThanOrEqual(2 * 3_600_000)
+    expect(() => run(state, 'op1', { type: 'open-emergency-access', targetType: 'letter', targetId: 'l2', reason: '合成演练：准备再开一次破窗核对另一封信。' })).toThrow('未复核的紧急破窗')
+  })
+  it('高严重度个案缺报告字段不能关闭，被反映者不能读取或接手', () => {
+    const state = seed()
+    expect(() => run(state, 'op2', { type: 'resolve-help-case', id: 'case-1', note: '已联系学校并完成必要记录。' })).toThrow('报告机关与回执')
+    expect(() => run(state, 'v1', { type: 'claim-help-case', id: 'case-1' })).toThrow('不能读取或接手')
+    expect(scopeState(state, 'v1').helpCases ?? []).toHaveLength(0)
+    let done = run(state, 'op2', { type: 'update-help-report', id: 'case-1', reportDecision: 'reported', reportAuthority: '合成区未成年人保护中心', reportReceipt: 'SYN-2026-001' })
+    done = run(done, 'op2', { type: 'resolve-help-case', id: 'case-1', note: '已完成报告并安排后续支持。' })
+    expect(done.helpCases!.find(item => item.id === 'case-1')!.status).toBe('resolved')
+  })
+  it('争议开启立即暂停该结对，只有双签名裁决后才能恢复', () => {
+    let state = seed()
+    state = run(state, 't1', { type: 'open-dispute', schoolId: 'school-a', topic: 'pause', pairId: 'p1', reason: '合成演练：出现需要联合复核的分歧。' })
+    const dispute = state.disputeCases!.at(-1)!
+    expect(state.pairs.find(pair => pair.id === 'p1')!.status).toBe('paused')
+    expect(() => run(state, 'op1', { type: 'resume-pair', id: 'p1' })).toThrow('争议裁决')
+    state = run(state, 't1', { type: 'decide-dispute', id: dispute.id, decision: 'resume', reason: '学校已完成核实。' })
+    expect(() => run(state, 'op1', { type: 'resume-pair', id: 'p1' })).toThrow('争议裁决')
+    state = run(state, 'op1', { type: 'decide-dispute', id: dispute.id, decision: 'resume', reason: '平台已复核，同意恢复。' })
+    expect(state.disputeCases!.find(item => item.id === dispute.id)!.status).toBe('decided')
+    state = run(state, 'op1', { type: 'resume-pair', id: 'p1' })
+    expect(state.pairs.find(pair => pair.id === 'p1')!.status).toBe('active')
+  })
+  it('暂停志愿者会暂停其全部结对，并为每个受影响孩子建立支持任务', () => {
+    const state = run(seed(), 'op1', { type: 'pause-volunteer', volunteerId: 'v2', reason: '合成演练：需要核实跨结对相似话术。' })
+    expect(state.pairs.filter(pair => pair.volunteerId === 'v2').map(pair => pair.status)).toEqual(['paused', 'paused'])
+    const tasks = state.supportTasks!.filter(task => state.pairs.some(pair => pair.volunteerId === 'v2' && pair.id === task.pairId))
+    expect(tasks).toHaveLength(2)
+    expect(tasks.every(task => task.status === 'open' && !!task.ownerTeacherId)).toBe(true)
+    expect(tasks[0].dueAt).toBe(new Date(Date.parse(state.clock) + 3 * 86_400_000).toISOString())
+  })
+  it('同一志愿者跨两个结对的相同话术聚合成一条风险信号', () => {
+    const body = '你好呀，最近我在窗边看到一只小鸟，它每天都停在同一根树枝上，我想把这个小小的发现分享给你，愿你今天也有好心情。'
+    let state = seed()
+    state = write(state, 'v2', 'script-p2', { pairId: 'p2', body })
+    state = submit(state, 'script-p2', 'v2')
+    expect(state.riskSignals!.filter(signal => signal.volunteerId === 'v2')).toHaveLength(0)
+    state = write(state, 'v2', 'script-p3', { pairId: 'p3', body })
+    state = submit(state, 'script-p3', 'v2')
+    const signals = state.riskSignals!.filter(signal => signal.volunteerId === 'v2')
+    expect(signals).toHaveLength(1)
+    expect([...signals[0].pairIds].sort()).toEqual(['p2', 'p3'])
+  })
+  it('未完成当前版本培训的志愿者不能提交首封信，完成后可提交', () => {
+    let state = run(seed(), 'op1', { type: 'match', childId: 'c3', volunteerId: 'v4', teacherId: 't1', channel: 'online' })
+    const pair = state.pairs.find(item => item.volunteerId === 'v4')!
+    expect(() => write(state, 'v4', 'v4-letter', { pairId: pair.id })).toThrow('行为边界培训')
+    state = run(state, 'v4', { type: 'complete-training', version: '2026-10-v1' })
+    state = write(state, 'v4', 'v4-letter', { pairId: pair.id })
+    state = submit(state, 'v4-letter', 'v4')
+    expect(state.letters.find(letter => letter.id === 'v4-letter')!.moderation).toBe('pending')
+  })
+  it('种子数据不变量零违规，人为破坏后报出对应规则', () => {
+    const state = seed()
+    expect(checkInvariants(state)).toEqual([])
+    const skipped = structuredClone(state)
+    skipped.deliveryEvents = [{ id: 'bad-delivery', letterId: 'l2', type: 'handed-to-child', actorId: 't2', at: state.clock }]
+    expect(checkInvariants(skipped).some(item => item.rule === 'PAPER_EVENT_ORDER')).toBe(true)
+    const duplicated = structuredClone(state)
+    duplicated.pairs.push({ ...duplicated.pairs[0], id: 'p1-duplicate' })
+    expect(checkInvariants(duplicated).some(item => item.rule === 'PAIR_UNIQUE')).toBe(true)
   })
 })

@@ -7,10 +7,12 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { ArrowLeft, ArrowRight, Check, HeartHandshake, Printer, Send, Users } from 'lucide-react'
 import { dispatch, formatDate, groupedResponseTasks, hasPermission, isOverdue, recipientForLetter, riddles } from '../data'
-import type { AppState, HelpCase, Letter, Pair, Person, Role, TeacherScope } from '../types'
+import type { AppState, DisputeDecision, HelpCase, Letter, Pair, Person, Role, TeacherScope } from '../types'
 import { BackLink, Badge, ContextLink, Empty, LetterBadge, LetterPaper, Notice, PageHeader, useAction } from '../ui'
 import { cloudConfigured, cloudHelpCase, cloudLetter } from '../services/cloud'
 import { detectContentSafetySignals } from '../safety-signals'
+import { checkInvariants } from '../invariants'
+import { hasSchoolSeat } from '../policy'
 import './Operations.css'
 
 type Props = { state: AppState; actor: Person; notify: (message: string) => void; setDirty?: (dirty: boolean) => void; registerSaveDraft?: (save?:()=>Promise<boolean>)=>void; mode?: 'demo' | 'live' }
@@ -312,8 +314,52 @@ export function TeacherPage({ state, actor, notify, mode }: Props) {
     : queues.print[0] ? { stage: 'print' as const, letter: queues.print[0], label: '先准备打印这一封信', description: '审核已通过。预览 A4 信纸并核对后，再记录打印。' }
     : urgentReply ? { stage: 'reply' as const, letter: urgentReply.letter, label: '留意这封信的回信', description: `回应约定于 ${formatDate(urgentReply.task!.dueAt)} 前完成。` }
     : undefined
+  const supportTasks = (state.supportTasks ?? []).filter(task => task.ownerTeacherId === actor.id && task.status === 'open')
+  const protectionCases = (state.helpCases ?? []).filter(item => item.schoolOwnerId === actor.id && item.status !== 'resolved')
+  const { run: runGuard, busy: guardBusy, error: guardError } = useAction(notify)
+  const [supportNote, setSupportNote] = useState<Record<string, string>>({})
+  const [reportPairId, setReportPairId] = useState('')
+  const [reportBody, setReportBody] = useState('')
+  const [reportDone, setReportDone] = useState(false)
+  const schoolDisputes = (state.disputeCases ?? []).filter(item => item.schoolId === actor.schoolId && item.status !== 'decided')
+  const canSignDispute = !!actor.schoolId && hasSchoolSeat(state, actor.id, actor.schoolId, state.clock)
+  const [disputeChoice, setDisputeChoice] = useState<Record<string, DisputeDecision>>({})
+  const [disputeReason, setDisputeReason] = useState<Record<string, string>>({})
+  async function signDispute(id: string) {
+    const choice = disputeChoice[id]
+    const reason = (disputeReason[id] ?? '').trim()
+    if (!choice || reason.length < 3) return
+    await runGuard(() => dispatch(actor.id, { type: 'decide-dispute', id, decision: choice, reason }), '已记录学校侧签名。平台侧签名完成且方向一致后，才允许恢复结对。')
+  }
+  async function completeSupportTask(id: string) {
+    const note = (supportNote[id] ?? '').trim()
+    if (note.length < 3) return
+    await runGuard(() => dispatch(actor.id, { type: 'complete-support-task', id, note }), '支持任务已记录完成；这不表示个案已经查实或关闭。')
+  }
+  async function reportAbnormal() {
+    const pair = statusPairs.find(item => item.id === reportPairId)
+    if (!pair || reportBody.trim().length < 2) return
+    const ok = await runGuard(() => dispatch(actor.id, { type: 'help', pairId: pair.id, reportedParty: 'volunteer', reportedPersonId: pair.volunteerId, body: reportBody.trim() }), '已保存到受限保护队列，等待独立保护负责人接手；这不表示已上报学校或外部机构。')
+    if (ok) { setReportBody(''); setReportPairId(''); setReportDone(true) }
+  }
   return <div className="stack operations-page">
     <PageHeader eyebrow="收发任务" title="今天，先照顾好这一封。" description="信件依次经过打印、实际交付与回信。每一步都由你确认后才会进入下一站。" />
+    <section className="stack" aria-label="保护与异常">
+      <div className="section-title"><h2>保护与异常</h2><Badge tone={protectionCases.length ? 'warning' : undefined}>{protectionCases.length ? `${protectionCases.length} 件由保护负责人跟进` : '暂无待处理个案'}</Badge></div>
+      {supportTasks.length > 0 && <div className="stack compact">{supportTasks.map(task => <article className="panel stack" key={task.id}><div><strong>联系孩子，确认近况与需要的支持</strong><small className="muted"> · {nameOf(state, task.childId)} · {formatDate(task.dueAt)} 前</small></div><div className="field"><label htmlFor={`support-${task.id}`}>已完成的支持动作</label><input id={`support-${task.id}`} value={supportNote[task.id] ?? ''} onChange={event => setSupportNote(old => ({ ...old, [task.id]: event.target.value }))} placeholder="例如：已联系孩子，本周状态平稳" /></div><button className="btn secondary small" type="button" disabled={guardBusy || (supportNote[task.id] ?? '').trim().length < 3} onClick={() => void completeSupportTask(task.id)}>记录已完成</button></article>)}</div>}
+      {protectionCases.length > 0 && <div className="stack compact">{protectionCases.map(item => <div className="operation-letter-row" key={item.id}><span><strong>保护个案 · {item.severity === 'high' ? '高严重度' : '一般'}</strong><small className="muted">{formatDate(item.createdAt)} · {item.status === 'open' ? '尚待接手' : '处理中'}</small></span><span className="letter-row-meta">正文只在保护流程中逐次授权读取</span></div>)}</div>}
+      {statusPairs.length > 0 && (reportDone ? <Notice>异常已保存到受限保护队列，等待独立保护负责人接手。这不表示已上报学校或外部机构。</Notice> : <details className="letter-options" open><summary>上报当次收发异常</summary><div className="stack"><div className="field"><label htmlFor="report-pair">涉及哪组结对</label><select id="report-pair" value={reportPairId} onChange={event => setReportPairId(event.target.value)}><option value="">请选择</option>{statusPairs.map(pair => <option key={pair.id} value={pair.id}>{nameOf(state, pair.childId)} ↔ {nameOf(state, pair.volunteerId)}</option>)}</select></div><div className="field"><label htmlFor="report-body">发生了什么（不写孩子的隐私细节）</label><textarea id="report-body" rows={3} value={reportBody} onChange={event => setReportBody(event.target.value)} /></div><button className="btn secondary" type="button" disabled={guardBusy || !reportPairId || reportBody.trim().length < 2} onClick={() => void reportAbnormal()}>保存异常记录</button>{guardError && <p className="field-error" role="alert">{guardError}</p>}</div></details>)}
+    </section>
+    {canSignDispute && schoolDisputes.length > 0 && <section className="stack" aria-label="学校侧争议签名">
+      <div className="section-title"><h2>学校侧争议签名</h2><Badge tone="warning">{schoolDisputes.length} 件待学校签名</Badge></div>
+      <p className="muted small-text">安全暂停必须由学校负责人与平台当值保护岗分别签名，且方向一致，才会解除。这里只记录裁决，不代替与家长和孩子的沟通。</p>
+      {schoolDisputes.map(item => <article className="panel stack" key={item.id}>
+        <div><strong>{item.topic === 'pause' ? '暂停与处理方式' : item.topic === 'delivery' ? '纸质交付' : item.topic === 'pairing' ? '结对安排' : item.topic === 'release' ? '信息发布' : '数据访问'}</strong><p className="muted small-text">{formatDate(item.openedAt)} · 学校签名：{item.schoolDecisionBy ? nameOf(state, item.schoolDecisionBy) : '未签名'} · 平台签名：{item.platformDecisionBy ? nameOf(state, item.platformDecisionBy) : '未签名'}</p></div>
+        {item.reason && <p className="preserve-lines">{item.reason}</p>}
+        {!item.schoolDecisionBy ? <div className="stack"><div className="field"><label htmlFor={`school-dispute-choice-${item.id}`}>学校侧裁决方向</label><select id={`school-dispute-choice-${item.id}`} value={disputeChoice[item.id] ?? ''} onChange={event => setDisputeChoice(old => ({ ...old, [item.id]: event.target.value as DisputeDecision }))}><option value="" disabled>请选择</option><option value="uphold-school">支持学校方案</option><option value="uphold-platform">支持平台方案</option><option value="compromise">折中方案</option></select></div><div className="field"><label htmlFor={`school-dispute-reason-${item.id}`}>学校签名理由</label><input id={`school-dispute-reason-${item.id}`} value={disputeReason[item.id] ?? ''} onChange={event => setDisputeReason(old => ({ ...old, [item.id]: event.target.value }))} /></div><button className="btn secondary small" type="button" disabled={guardBusy || !disputeChoice[item.id] || (disputeReason[item.id] ?? '').trim().length < 3} onClick={() => void signDispute(item.id)}>记录学校签名</button></div> : <Notice>学校侧已完成签名，等待平台当值保护岗签名。</Notice>}
+      </article>)}
+      {guardError && <p className="field-error" role="alert">{guardError}</p>}
+    </section>}
     {next ? <section className="operations-next panel stack" aria-label="现在最需要处理的任务">
       <p className="eyebrow">现在最需要处理</p><h2>{next.label}</h2><p><strong>{next.letter.title}</strong> · {nameOf(state, next.letter.authorId)}写给{nameOf(state, recipientForLetter(state, next.letter))}</p><p className="muted">{next.description}</p>
       <ContextLink className="btn" to={`/teacher/tasks/${next.stage}?letter=${encodeURIComponent(next.letter.id)}`} returnTo={`/teacher/tasks/${next.stage}`} returnLabel={`返回${teacherStages.find(item => item.key === next.stage)?.label}列表`} historyBack={false}>查看并处理这封信<ArrowRight size={17} aria-hidden="true" /></ContextLink>
@@ -631,17 +677,20 @@ export function OperatorPage({ state, actor, mode = 'demo' }: Props) {
   const canHelp = hasPermission(actor, 'safeguarding') && actor.accountStatus !== 'disabled'
   const canAdmin = hasPermission(actor, 'administration') && actor.accountStatus !== 'disabled'
   const canReview = hasPermission(actor, 'review')
-  if (!canHelp && !canAdmin && !canReview) return <Empty title="当前身份还没有运营任务权限" description="请联系管理员分配对应职责。" />
+  const canMatch = hasPermission(actor, 'matching') && actor.accountStatus !== 'disabled'
+  const canPrivacy = hasPermission(actor, 'privacy') && actor.accountStatus !== 'disabled'
+  if (!canHelp && !canAdmin && !canReview && !canMatch && !canPrivacy) return <Empty title="当前身份还没有运营任务权限" description="请联系管理员分配对应职责。" />
   const help = canHelp ? (state.helpCases ?? []).filter(item => item.status !== 'resolved' && !item.excludedActorIds.includes(actor.id) && (item.ownerId === actor.id || item.backupOwnerId === actor.id)) : []
   const overdue = canAdmin ? state.followups.filter(item => item.kind === 'overdue' && item.status === 'open') : []
   const reviews = canReview ? state.letters.filter(letter => letter.moderation === 'pending' && (mode === 'demo' || letter.reviewAssigneeId === actor.id)).sort((a, b) => Date.parse(a.updatedAt) - Date.parse(b.updatedAt)) : []
   const eligibleVolunteers = state.people.filter(person => person.role === 'volunteer' && (mode === 'demo' || person.accountStatus === 'active' && person.volunteerApproved))
-  const unmatched = canAdmin ? state.people.filter(person => person.role === 'child' && (mode === 'demo' || person.accountStatus === 'active' && person.guardianConsent && person.teacherId) && eligibleVolunteers.some(volunteer => !state.pairs.some(pair => pair.status !== 'ended' && pair.childId === person.id && pair.volunteerId === volunteer.id))) : []
+  const unmatched = canAdmin || canMatch ? state.people.filter(person => person.role === 'child' && (mode === 'demo' || person.accountStatus === 'active' && person.guardianConsent && person.teacherId) && eligibleVolunteers.some(volunteer => !state.pairs.some(pair => pair.status !== 'ended' && pair.childId === person.id && pair.volunteerId === volunteer.id))) : []
   const priorities = [
     ...(canHelp ? [{ key: 'help', label: '需要回应的求助', count: help.length, to: help[0] ? `/operator/followups?kind=help&item=${encodeURIComponent(help[0].id)}` : '/operator/followups?kind=help', queue: '/operator/followups?kind=help', description: '受限记录，请先倾听并安排合适的负责人。' }] : []),
     ...(canAdmin ? [{ key: 'overdue', label: '需要了解的逾期', count: overdue.length, to: overdue[0] ? `/operator/followups?kind=overdue&item=${encodeURIComponent(overdue[0].id)}` : '/operator/followups?kind=overdue', queue: '/operator/followups?kind=overdue', description: '了解是否遇到困难，再决定延期或暂停。' }] : []),
     ...(canReview ? [{ key: 'review', label: '等待逐封审核', count: reviews.length, to: reviews[0] ? `/operator/review?letter=${encodeURIComponent(reviews[0].id)}` : '/operator/review', queue: '/operator/review', description: '阅读信件并决定通过或给出具体修改建议。' }] : []),
-    ...(canAdmin ? [{ key: 'pair', label: '等待安排结对', count: unmatched.length, to: '/operator/pairs', queue: '/operator/pairs', description: '核对伙伴与协助老师，建立一段陪伴。' }] : []),
+    ...(canAdmin || canMatch ? [{ key: 'pair', label: '等待安排结对', count: unmatched.length, to: '/operator/pairs', queue: '/operator/pairs', description: '核对伙伴与协助老师，建立一段陪伴。' }] : []),
+    ...(canPrivacy ? [{ key: 'privacy', label: '隐私复核与闭环自检', count: (state.accessGrants ?? []).filter(grant => grant.emergency && !grant.reviewedAt).length, to: '/operator/system-check', queue: '/operator/system-check', description: '复核紧急破窗，检查闭环不变量。' }] : []),
   ]
   const first = priorities.find(item => item.count > 0)
   return <div className="stack operations-page">
@@ -660,7 +709,7 @@ export function OperatorReviewPage(props: Props) {
 }
 
 export function OperatorPairsPage(props: Props) {
-  if (props.actor.role !== 'operator' || !hasPermission(props.actor, 'administration')) return <Empty title="这项任务需要结对管理权限" />
+  if (props.actor.role !== 'operator' || !(hasPermission(props.actor, 'administration') || hasPermission(props.actor, 'matching'))) return <Empty title="这项任务需要结对管理权限" />
   return <div className="stack operations-page"><BackLink fallbackTo="/space" fallbackLabel="返回运营待处理" /><PageHeader eyebrow="结对管理" title="把合适的伙伴联系起来。" description="核对人员与收发方式。暂停、恢复或结束都保留处理记录。" /><Matching {...props} /></div>
 }
 
@@ -669,4 +718,136 @@ export function OperatorFollowupPage(props: Props) {
   if (props.actor.role !== 'operator' || props.actor.accountStatus === 'disabled' || !(hasPermission(props.actor, 'administration') || hasPermission(props.actor, 'safeguarding'))) return <Empty title="这项任务需要跟进权限" />
   const help = searchParams.get('kind') === 'help'
   return <div className="stack operations-page">{!searchParams.has('item') && <BackLink fallbackTo="/space" fallbackLabel="返回运营待处理" />}<PageHeader eyebrow={help ? '受限保护个案' : '持续跟进'} title={help ? '先保护，再记录与交接。' : '先了解情况，再记录下一步。'} description={help ? '个案独立于结对；被反映者和利益冲突者不能读取或处理。' : '这里仅处理书信回应进度，不混入求助全文。'} />{help ? <HelpCaseQueue {...props} /> : <FollowupQueue {...props} />}</div>
+}
+
+const riskKindLabels: Record<string, string> = {
+  'contact-request': '索要联系方式',
+  secrecy: '要求保密',
+  gift: '礼物或交换',
+  meetup: '私下见面',
+  'duplicate-script': '跨结对重复话术',
+  'external-link': '站外链接',
+}
+const severityLabels = { low: '低', medium: '中', high: '高' } as const
+
+function RiskSignalPanel({ state, actor, notify }: Props) {
+  const [notes, setNotes] = useState<Record<string, string>>({})
+  const { run, busy, error } = useAction(notify)
+  const signals = (state.riskSignals ?? []).filter(item => item.status === 'open' || item.status === 'reviewing')
+  const act = (id: string, action: 'dismiss' | 'pause-volunteer' | 'open-case', message: string) =>
+    run(() => dispatch(actor.id, { type: 'review-risk-signal', id, action, note: notes[id] ?? '' }), message)
+  return <section className="panel stack" aria-label="风险信号">
+    <div className="section-title"><h2>风险信号</h2><Badge tone={signals.length ? 'warning' : undefined}>{signals.length ? `${signals.length} 条待复核` : '暂无待复核'}</Badge></div>
+    <p className="muted small-text">自动检测只作提示，不代表事实结论。处置必须由未涉事的保护岗人工复核并记录理由。</p>
+    {signals.map(signal => <article className="panel stack" key={signal.id}>
+      <div><strong>{riskKindLabels[signal.kind] ?? signal.kind} · 严重度{severityLabels[signal.severity]}</strong><p className="muted small-text">{nameOf(state, signal.volunteerId)} · 涉及 {signal.pairIds.length} 组结对、{signal.letterIds.length} 封信 · {formatDate(signal.createdAt)}</p></div>
+      <div className="field"><label htmlFor={`risk-note-${signal.id}`}>复核说明（至少 5 字）</label><textarea id={`risk-note-${signal.id}`} rows={3} value={notes[signal.id] ?? ''} onChange={event => setNotes(old => ({ ...old, [signal.id]: event.target.value }))} /></div>
+      <div className="toolbar">
+        <button className="btn secondary small" type="button" disabled={busy || (notes[signal.id] ?? '').trim().length < 5} onClick={() => void act(signal.id, 'dismiss', '已记录排除理由；这只是本次信号的人工结论。')}>排除并记录理由</button>
+        <button className="btn secondary small" type="button" disabled={busy || (notes[signal.id] ?? '').trim().length < 5} onClick={() => void act(signal.id, 'open-case', '已建立保护个案，等待独立保护人员接手。')}>建立保护个案</button>
+        <button className="btn small" type="button" disabled={busy || (notes[signal.id] ?? '').trim().length < 5} onClick={() => void act(signal.id, 'pause-volunteer', '已保护性暂停该志愿者的活跃结对，并为受影响孩子建立支持任务。')}>保护性暂停并建支持任务</button>
+      </div>
+    </article>)}
+    {error && <p className="field-error" role="alert">{error}</p>}
+  </section>
+}
+
+function DutyPanel({ state }: { state: AppState }) {
+  const shifts = (state.dutyShifts ?? []).filter(shift => shift.startsAt <= state.clock && shift.endsAt > state.clock)
+  return <section className="panel stack" aria-label="当前值班">
+    <div className="section-title"><h2>当前值班</h2><Badge>{shifts.length ? `${shifts.length} 段在岗` : '未配置值班'}</Badge></div>
+    <p className="muted small-text">合成演示值班表只用于验证升级路径；真实试点前需由学校和平台确认值守时段与替补。未配置值班时不承诺回应时限。</p>
+    {shifts.length ? <div className="stack compact">{shifts.map(shift => <div className="operation-letter-row" key={shift.id}><span><strong>{shift.scope === 'platform' ? '平台值班' : `学校值班 · ${nameOf(state, shift.userId)}`}</strong><small className="muted">{shift.scope === 'school' ? '' : nameOf(state, shift.userId)} · 替补 {nameOf(state, shift.backupUserId)}</small></span><span className="letter-row-meta">{formatDate(shift.startsAt)} 至 {formatDate(shift.endsAt)}</span></div>)}</div> : <Empty title="当前没有已配置的值班" description="求助仍可保存，但升级与回应依赖现实中的人工值守。" />}
+  </section>
+}
+
+export function OperatorSafeguardingPage(props: Props) {
+  const { state, actor } = props
+  if (actor.role !== 'operator' || actor.accountStatus === 'disabled' || !hasPermission(actor, 'safeguarding')) return <Empty title="这项任务需要保护权限" description="普通审核队列不能读取求助全文与风险信号。"><Link className="btn secondary" to="/space">返回待处理</Link></Empty>
+  return <div className="stack operations-page">
+    <BackLink fallbackTo="/space" fallbackLabel="返回运营待处理" />
+    <PageHeader eyebrow="保护与风险" title="先保护，再记录与交接。" description="个案全文逐次授权读取；风险信号只是提示，处置必须由未涉事保护岗人工复核。" />
+    <nav className="toolbar" aria-label="保护相关页面"><Link className="btn secondary small" to="/operator/disputes">争议裁决与双签名</Link><Link className="btn secondary small" to="/operator/system-check">闭环自检</Link></nav>
+    <DutyPanel state={state} />
+    <RiskSignalPanel {...props} />
+    <HelpCaseQueue {...props} />
+  </div>
+}
+
+export function OperatorDisputePage(props: Props) {
+  const { state, actor, notify } = props
+  const [pairId, setPairId] = useState('')
+  const [topic, setTopic] = useState<'pairing' | 'release' | 'delivery' | 'pause' | 'data'>('pause')
+  const [openReason, setOpenReason] = useState('')
+  const [signReason, setSignReason] = useState<Record<string, string>>({})
+  const [decision, setDecision] = useState<Record<string, 'uphold-school' | 'uphold-platform' | 'compromise'>>({})
+  const { run, busy, error } = useAction(notify)
+  if (actor.role !== 'operator' || !(hasPermission(actor, 'safeguarding') || hasPermission(actor, 'matching'))) return <Empty title="这项任务需要结对或保护权限" description="争议用于跨学校与平台的共同裁决。"><Link className="btn secondary" to="/space">返回待处理</Link></Empty>
+  const pairs = state.pairs.filter(pair => pair.status !== 'ended')
+  const disputes = [...(state.disputeCases ?? [])].sort((a, b) => Date.parse(b.openedAt) - Date.parse(a.openedAt))
+  async function openDispute() {
+    const pair = pairs.find(item => item.id === pairId)
+    if (!pair?.schoolId || openReason.trim().length < 3) return
+    const ok = await run(() => dispatch(actor.id, { type: 'open-dispute', schoolId: pair.schoolId!, topic, pairId: pair.id, reason: openReason.trim() }), '争议已保存。涉及暂停、交付或结对的争议会立即暂停该组陪伴，等待双方签名。')
+    if (ok) { setOpenReason(''); setPairId('') }
+  }
+  async function sign(id: string) {
+    const reason = (signReason[id] ?? '').trim()
+    const choice = decision[id]
+    if (!choice || reason.length < 3) return
+    await run(() => dispatch(actor.id, { type: 'decide-dispute', id, decision: choice, reason }), '已记录平台侧签名。双方签名由不同负责人完成且方向一致后，才允许恢复结对。')
+  }
+  return <div className="stack operations-page">
+    <BackLink fallbackTo="/space" fallbackLabel="返回运营待处理" />
+    <PageHeader eyebrow="争议裁决" title="分歧要写下来，也要有双方签名。" description="学校负责人与平台负责人分别签名；任一侧未签名时，安全暂停不能解除。" />
+    <section className="panel stack" aria-label="开启争议">
+      <h2>开启争议</h2>
+      <p className="muted small-text">结对、交付、暂停与数据议题都可以记录。涉及安全的分歧会先暂停该组陪伴。</p>
+      <div className="field"><label htmlFor="dispute-pair">涉及哪组结对</label><select id="dispute-pair" value={pairId} onChange={event => setPairId(event.target.value)}><option value="">请选择</option>{pairs.map(pair => <option key={pair.id} value={pair.id}>{nameOf(state, pair.childId)} ↔ {nameOf(state, pair.volunteerId)}</option>)}</select></div>
+      <div className="field"><label htmlFor="dispute-topic">议题</label><select id="dispute-topic" value={topic} onChange={event => setTopic(event.target.value as typeof topic)}><option value="pause">暂停与处理方式</option><option value="delivery">纸质交付</option><option value="pairing">结对安排</option><option value="release">信息发布</option><option value="data">数据访问</option></select></div>
+      <div className="field"><label htmlFor="dispute-reason">分歧说明（至少 3 字）</label><textarea id="dispute-reason" rows={3} value={openReason} onChange={event => setOpenReason(event.target.value)} /></div>
+      <button className="btn secondary" type="button" disabled={busy || !pairId || openReason.trim().length < 3} onClick={() => void openDispute()}>保存争议</button>
+    </section>
+    <section className="panel stack" aria-label="争议列表">
+      <h2>进行中与已裁决的争议</h2>
+      {disputes.length ? <div className="stack compact">{disputes.map(item => <article className="panel stack" key={item.id}>
+        <div><strong>{item.topic === 'pause' ? '暂停与处理方式' : item.topic === 'delivery' ? '纸质交付' : item.topic === 'pairing' ? '结对安排' : item.topic === 'release' ? '信息发布' : '数据访问'} · {item.status === 'decided' ? '已裁决' : item.status === 'joint-review' ? '共同审查中' : '待处理'}</strong><p className="muted small-text">{formatDate(item.openedAt)} · 学校签名：{item.schoolDecisionBy ? nameOf(state, item.schoolDecisionBy) : '未签名'} · 平台签名：{item.platformDecisionBy ? nameOf(state, item.platformDecisionBy) : '未签名'}</p></div>
+        <p className="preserve-lines">{item.reason}</p>
+        {item.status !== 'decided' && !item.platformDecisionBy && <div className="stack"><div className="field"><label htmlFor={`dispute-decision-${item.id}`}>平台侧裁决方向</label><select id={`dispute-decision-${item.id}`} value={decision[item.id] ?? ''} onChange={event => setDecision(old => ({ ...old, [item.id]: event.target.value as 'uphold-school' }))}><option value="" disabled>请选择</option><option value="uphold-school">支持学校方案</option><option value="uphold-platform">支持平台方案</option><option value="compromise">折中方案</option></select></div><div className="field"><label htmlFor={`dispute-sign-${item.id}`}>平台签名理由</label><input id={`dispute-sign-${item.id}`} value={signReason[item.id] ?? ''} onChange={event => setSignReason(old => ({ ...old, [item.id]: event.target.value }))} /></div><button className="btn secondary small" type="button" disabled={busy || !decision[item.id] || (signReason[item.id] ?? '').trim().length < 3} onClick={() => void sign(item.id)}>记录平台签名</button></div>}
+        {item.status === 'decided' && <Notice>双方签名已完成。恢复结对需在结对页按暂停原因处理，且不会自动补投暂停期间的信件。</Notice>}
+      </article>)}</div> : <Empty title="当前没有争议记录" description="出现跨学校与平台的分歧时，可在这里留下双方都能复核的裁决。" />}
+      {error && <p className="field-error" role="alert">{error}</p>}
+    </section>
+  </div>
+}
+
+export function OperatorSystemCheckPage({ state, actor }: Props) {
+  if (actor.role !== 'operator' || !hasPermission(actor, 'privacy')) return <Empty title="这项任务需要隐私与审计权限" description="系统自检只对隐私与审计授权包开放。"><Link className="btn secondary" to="/space">返回待处理</Link></Empty>
+  const violations = checkInvariants(state)
+  const pending = (state.accessGrants ?? []).filter(grant => grant.emergency && !grant.reviewedAt)
+  return <div className="stack operations-page">
+    <BackLink fallbackTo="/space" fallbackLabel="返回运营待处理" />
+    <PageHeader eyebrow="系统自检" title="把规则写成可以检查的条目。" description="这里只读展示闭环不变量与待复核的紧急访问，不替代人工判断。" />
+    <section className="panel stack" aria-label="闭环不变量">
+      <div className="section-title"><h2>闭环不变量</h2><Badge tone={violations.length ? 'warning' : undefined}>{violations.length ? `${violations.length} 条待复核` : '当前为 0 违规'}</Badge></div>
+      {violations.length ? <ul className="stack compact">{violations.map((violation, index) => <li key={`${violation.rule}-${index}`} className="operation-letter-row"><span><strong>{violation.rule} · {violation.severity === 'high' ? '高' : '中'}</strong><small className="muted">{violation.message}</small></span><span className="letter-row-meta">{violation.refs.join('、')}</span></li>)}</ul> : <p className="muted small-text">种子数据的结对、信本身份、纸信事件顺序、报告字段、回避关系、授权生命周期、破窗复核、暂停期间投递、结对唯一性、暂停说明和风险信号处置均未发现违规。</p>}
+    </section>
+    <BreakGlassReview grants={pending} state={state} actor={actor} />
+  </div>
+}
+
+function BreakGlassReview({ grants, state, actor }: { grants: NonNullable<AppState['accessGrants']>; state: AppState; actor: Person }) {
+  const [notes, setNotes] = useState<Record<string, string>>({})
+  const [decision, setDecision] = useState<Record<string, 'upheld' | 'revoked'>>({})
+  const { run, busy, error } = useAction(() => {})
+  return <section className="panel stack" aria-label="待复核的紧急访问">
+    <div className="section-title"><h2>待复核的紧急访问</h2><Badge tone={grants.length ? 'warning' : undefined}>{grants.length ? `${grants.length} 条` : '暂无'}</Badge></div>
+    <p className="muted small-text">紧急破窗只作用于单个对象，最长 2 小时，并须在 24 小时内由未开启该访问的隐私岗复核。</p>
+    {grants.length ? <div className="stack compact">{grants.map(grant => <article className="panel stack" key={grant.id}>
+      <div><strong>{grant.targetType === 'letter' ? '信件' : grant.targetType === 'attachment' ? '图片' : grant.targetType === 'help-case' ? '保护个案' : '概况'} · {grant.targetId}</strong><p className="muted small-text">申请人 {nameOf(state, grant.actorId)} · {formatDate(grant.startsAt)} 至 {formatDate(grant.expiresAt)} · 复核期限 {grant.reviewDueAt ? formatDate(grant.reviewDueAt) : '未记录'}</p></div>
+      <p className="preserve-lines">{grant.reason}</p>
+      {grant.actorId === actor.id ? <Notice>不能复核自己开启的紧急访问，请交给另一位隐私岗。</Notice> : <div className="stack"><div className="field"><label htmlFor={`grant-decision-${grant.id}`}>复核结论</label><select id={`grant-decision-${grant.id}`} value={decision[grant.id] ?? ''} onChange={event => setDecision(old => ({ ...old, [grant.id]: event.target.value as 'upheld' }))}><option value="" disabled>请选择</option><option value="upheld">维持：访问确有必要</option><option value="revoked">撤销：访问不当</option></select></div><div className="field"><label htmlFor={`grant-note-${grant.id}`}>复核说明（至少 3 字）</label><input id={`grant-note-${grant.id}`} value={notes[grant.id] ?? ''} onChange={event => setNotes(old => ({ ...old, [grant.id]: event.target.value }))} /></div><button className="btn secondary small" type="button" disabled={busy || !decision[grant.id] || (notes[grant.id] ?? '').trim().length < 3} onClick={() => void run(() => dispatch(actor.id, { type: 'review-emergency-access', id: grant.id, decision: decision[grant.id], note: notes[grant.id] }), '紧急访问复核已记录。')}>保存复核结论</button></div>}
+    </article>)}</div> : <Empty title="没有待复核的紧急访问" description="开启记录与复核结论都会进入审计。" />}
+    {error && <p className="field-error" role="alert">{error}</p>}
+  </section>
 }

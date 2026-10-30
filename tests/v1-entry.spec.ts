@@ -51,16 +51,20 @@ test('孩子从信箱打开来信后，返回键回到信箱并恢复入口焦�
 
 test('未保存的信拦截浏览器后退，可保存后离开并继续写', async ({ page }) => {
   await page.goto('/#/demo/start/child')
+  await expect(page).toHaveURL(/#\/space$/)
   await page.locator('main').getByRole('link', { name: '写一封信', exact: true }).click()
+  await page.locator('main a[href="#/write?pair=p1"]').click()
+  await expect(page).toHaveURL(/#\/write\?pair=p1$/)
   await page.getByLabel('想说的话').fill('这封信还没有保存，我想离开前确认内容不会消失。')
   await page.goBack({ waitUntil: 'commit' })
   const dialog = page.getByRole('dialog', { name: '这封信还没有保存' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: '保存后离开', exact: true }).click()
+  await expect(page).toHaveURL(/#\/write$/)
+  await page.goBack()
   await expect(page).toHaveURL(/#\/space$/)
   await expect(page.locator('main').getByRole('link', { name: '接着写', exact: true })).toBeVisible()
-  await page.goForward()
-  await expect(page).toHaveURL(/#\/write\?pair=p1$/)
+  await page.locator('main').getByRole('link', { name: '接着写', exact: true }).click()
   await expect(page.getByLabel('想说的话')).toHaveValue('这封信还没有保存，我想离开前确认内容不会消失。')
 })
 

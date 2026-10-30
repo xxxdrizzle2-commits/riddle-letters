@@ -21,6 +21,9 @@ const OperatorPage = lazy(() => import('./pages/Operations').then(module => ({ d
 const OperatorReviewPage = lazy(() => import('./pages/Operations').then(module => ({ default: module.OperatorReviewPage })))
 const OperatorPairsPage = lazy(() => import('./pages/Operations').then(module => ({ default: module.OperatorPairsPage })))
 const OperatorFollowupPage = lazy(() => import('./pages/Operations').then(module => ({ default: module.OperatorFollowupPage })))
+const OperatorSafeguardingPage = lazy(() => import('./pages/Operations').then(module => ({ default: module.OperatorSafeguardingPage })))
+const OperatorDisputePage = lazy(() => import('./pages/Operations').then(module => ({ default: module.OperatorDisputePage })))
+const OperatorSystemCheckPage = lazy(() => import('./pages/Operations').then(module => ({ default: module.OperatorSystemCheckPage })))
 const AuthPage = lazy(() => import('./pages/Auth').then(module => ({ default: module.AuthPage })))
 const AccountPage = lazy(() => import('./pages/Account').then(module => ({ default: module.AccountPage })))
 const ManageAccountsPage = lazy(() => import('./pages/Account').then(module => ({ default: module.ManageAccountsPage })))
@@ -225,6 +228,9 @@ function Shell() {
     <Route path="/operator/review" element={guard(() => <OperatorReviewPage key={actor!.id} {...props!}/>, ['operator'])}/>
     <Route path="/operator/pairs" element={guard(() => <OperatorPairsPage key={actor!.id} {...props!}/>, ['operator'])}/>
     <Route path="/operator/followups" element={guard(() => <OperatorFollowupPage key={actor!.id} {...props!}/>, ['operator'])}/>
+    <Route path="/operator/safeguarding" element={guard(() => <OperatorSafeguardingPage key={actor!.id} {...props!}/>, ['operator'])}/>
+    <Route path="/operator/disputes" element={guard(() => <OperatorDisputePage key={actor!.id} {...props!}/>, ['operator'])}/>
+    <Route path="/operator/system-check" element={guard(() => <OperatorSystemCheckPage key={actor!.id} {...props!}/>, ['operator'])}/>
     <Route path="/account" element={guard(() => <AccountPage {...props!} onLogout={exitWorkspace}/>)}/>
     <Route path="/account/manage" element={guard(() => <ManageAccountsPage {...props!}/>, ['teacher', 'operator'])}/>
     <Route path="/help" element={guard(() => <HelpPage {...props!}/>)}/>
@@ -286,7 +292,7 @@ const roleNavigation: Record<Role, NavItem[]> = {
   child: [{ to: '/space', label: '信箱', icon: Mail }, { to: '/write', label: '写信', icon: Feather }, { to: '/account', label: '我的', icon: UserRound }],
   volunteer: [{ to: '/space', label: '陪伴任务', icon: HeartHandshake }, { to: '/write', label: '写信', icon: Feather }, { to: '/correspondence', label: '书信往来', icon: Mail }],
   teacher: [{ to: '/space', label: '收发任务', icon: Mail }, { to: '/teacher/history', label: '处理记录', icon: BookOpen }, { to: '/account', label: '我的', icon: UserRound }],
-  operator: [{ to: '/space', label: '待处理', icon: HeartHandshake }, { to: '/operator/review', label: '审核', icon: Mail }, { to: '/operator/pairs', label: '结对', icon: Users }, { to: '/operator/followups', label: '跟进', icon: BookOpen }],
+  operator: [{ to: '/space', label: '待处理', icon: HeartHandshake }, { to: '/operator/review', label: '审核', icon: Mail }, { to: '/operator/pairs', label: '结对', icon: Users }, { to: '/operator/followups', label: '跟进', icon: BookOpen }, { to: '/operator/safeguarding', label: '保护', icon: CheckCircle2 }, { to: '/operator/system-check', label: '自检', icon: Settings2 }],
 }
 function navActive(pathname: string, role: Role, to: string) {
   if (to === '/space') return pathname === '/space' || role === 'child' && (pathname === '/correspondence' || pathname.startsWith('/letters/')) || role === 'teacher' && pathname.startsWith('/teacher/tasks/')

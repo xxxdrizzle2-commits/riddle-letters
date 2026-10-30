@@ -234,4 +234,57 @@ describe('command authorization responses', () => {
     await executeCommand(repository, { uid: 'coordinator-1' }, { requestId: 'same-school-assign1', command: { type: 'assign-teacher', schoolId: 'school-1', teacherId: 'teacher-1', childId: 'child-1', scope: ['status', 'paper-delivery'], startsAt: store.state.clock, endsAt: '2026-12-01T00:00:00.000Z' } })
     expect(store.state.teacherAssignments.some(item => item.teacherId === 'teacher-1' && item.childId === 'child-1')).toBe(true)
   })
+
+  it('rejects a letter read from the wrong pair and records the denial reason', async () => {
+    const store = emptyStore('2026-10-21T00:00:00.000Z')
+    const repository: Repository = { read: operation => operation(store), transact: operation => operation(store) }
+    for (const [uid, role] of [['child-1', 'child'], ['child-2', 'child'], ['volunteer-1', 'volunteer']] as const) {
+      store.accounts[uid] = { uid, role, status: 'active', permissions: [], createdAt: store.state.clock }
+      store.state.people.push({ id: uid, role, nickname: uid, subtitle: '', avatar: '', interests: [], accountStatus: 'active' })
+    }
+    store.state.pairs = [{ id: 'pair-1', childId: 'child-1', volunteerId: 'volunteer-1', teacherId: 'teacher-1', channel: 'online', status: 'active', startedAt: store.state.clock }]
+    store.state.letters = [{ id: 'letter-1', pairId: 'pair-1', authorId: 'volunteer-1', recipientId: 'child-1', createdBy: 'volunteer-1', deliveryRoute: 'online', title: '合成来信', body: '仅用于权限测试', moderation: 'approved', revision: 1, createdAt: store.state.clock, updatedAt: store.state.clock }]
+    store.state.deliveries = [{ letterId: 'letter-1', deliveredAt: store.state.clock }]
+    await expect(executeLetterContentRead(repository, { uid: 'child-2' }, 'letter-1')).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
+    const audit = store.accessAudit.filter(item => item.targetType === 'letter' && item.targetId === 'letter-1').at(-1)!
+    expect(audit).toMatchObject({ decision: 'denied', reasonCode: 'NO_ASSIGNMENT' })
+  })
+
+  it('rejects a teacher whose assignment was revoked', async () => {
+    const store = emptyStore('2026-10-21T00:00:00.000Z')
+    const repository: Repository = { read: operation => operation(store), transact: operation => operation(store) }
+    for (const [uid, role] of [['teacher-1', 'teacher'], ['child-1', 'child'], ['volunteer-1', 'volunteer']] as const) {
+      store.accounts[uid] = { uid, role, status: 'active', permissions: [], createdAt: store.state.clock }
+      store.state.people.push({ id: uid, role, nickname: uid, subtitle: '', avatar: '', interests: [], accountStatus: 'active', schoolId: uid === 'teacher-1' || uid === 'child-1' ? 'school-1' : undefined })
+    }
+    store.state.schools = [{ id: 'school-1', name: '合成学校', status: 'active' }]
+    store.state.teacherAssignments = [{ id: 'assignment-1', schoolId: 'school-1', teacherId: 'teacher-1', childId: 'child-1', scope: ['status', 'capture', 'paper-delivery'], startsAt: '2026-10-01T00:00:00.000Z', revokedAt: '2026-10-20T00:00:00.000Z', approvedBy: 'school-owner' }]
+    store.state.pairs = [{ id: 'pair-1', childId: 'child-1', volunteerId: 'volunteer-1', teacherId: 'teacher-1', schoolId: 'school-1', channel: 'paper', status: 'active', startedAt: store.state.clock }]
+    store.state.letters = [{ id: 'letter-1', pairId: 'pair-1', authorId: 'volunteer-1', recipientId: 'child-1', createdBy: 'volunteer-1', deliveryRoute: 'school-paper', title: '合成来信', body: '仅用于权限测试', moderation: 'approved', revision: 1, createdAt: store.state.clock, updatedAt: store.state.clock }]
+    store.state.deliveries = [{ letterId: 'letter-1' }]
+    await expect(executeLetterContentRead(repository, { uid: 'teacher-1' }, 'letter-1')).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
+  })
+
+  it('records emergency break-glass reads as high severity and refuses a second outstanding one', async () => {
+    const store = emptyStore('2026-10-21T00:00:00.000Z')
+    const repository: Repository = { read: operation => operation(store), transact: operation => operation(store) }
+    store.accounts['safe-operator'] = { uid: 'safe-operator', role: 'operator', status: 'active', permissions: ['help'], createdAt: store.state.clock }
+    for (const [uid, role] of [['safe-operator', 'operator'], ['child-1', 'child'], ['volunteer-1', 'volunteer']] as const) {
+      store.accounts[uid] ??= { uid, role, status: 'active', permissions: [], createdAt: store.state.clock }
+      store.state.people.push({ id: uid, role, nickname: uid, subtitle: '', avatar: '', interests: [], accountStatus: 'active' })
+    }
+    store.state.pairs = [{ id: 'pair-1', childId: 'child-1', volunteerId: 'volunteer-1', teacherId: 'teacher-1', channel: 'online', status: 'active', startedAt: store.state.clock }]
+    store.state.letters = [
+      { id: 'letter-1', pairId: 'pair-1', authorId: 'volunteer-1', recipientId: 'child-1', createdBy: 'volunteer-1', deliveryRoute: 'online', title: '合成来信', body: '紧急核实用正文', moderation: 'approved', revision: 1, createdAt: store.state.clock, updatedAt: store.state.clock },
+      { id: 'letter-2', pairId: 'pair-1', authorId: 'volunteer-1', recipientId: 'child-1', createdBy: 'volunteer-1', deliveryRoute: 'online', title: '合成来信二', body: '第二封', moderation: 'approved', revision: 1, createdAt: store.state.clock, updatedAt: store.state.clock },
+    ]
+    store.state.deliveries = [{ letterId: 'letter-1', deliveredAt: store.state.clock }, { letterId: 'letter-2', deliveredAt: store.state.clock }]
+    await executeCommand(repository, { uid: 'safe-operator' }, { requestId: 'break-glass-letter-1', command: { type: 'open-emergency-access', targetType: 'letter', targetId: 'letter-1', reason: '合成演练：来信出现紧急风险线索，需要立即核实。' } })
+    const grant = store.state.accessGrants!.at(-1)!
+    expect(grant).toMatchObject({ targetType: 'letter', targetId: 'letter-1', emergency: true })
+    expect(Date.parse(grant.expiresAt) - Date.parse(store.state.clock)).toBeLessThanOrEqual(2 * 3_600_000)
+    await expect(executeLetterContentRead(repository, { uid: 'safe-operator' }, 'letter-1')).resolves.toMatchObject({ body: '紧急核实用正文' })
+    expect(store.accessAudit.filter(item => item.targetId === 'letter-1').at(-1)).toMatchObject({ decision: 'allowed', severity: 'high', grantId: grant.id })
+    await expect(executeCommand(repository, { uid: 'safe-operator' }, { requestId: 'break-glass-letter-2', command: { type: 'open-emergency-access', targetType: 'letter', targetId: 'letter-2', reason: '合成演练：准备再开一次破窗核对另一封信。' } })).rejects.toThrow('未复核的紧急破窗')
+  })
 })

@@ -46,6 +46,13 @@ async function submitLetter(page: Page) {
   await expect(page.getByText('现在还不能写这封信')).toHaveCount(0)
 }
 
+async function openWrite(page: Page, pairId = 'p1') {
+  await page.locator('main').getByRole('link', { name: '写一封信', exact: true }).click()
+  const partner = page.locator(`main a[href="#/write?pair=${pairId}"]`)
+  if (await partner.count()) await partner.click()
+  await expect(page).toHaveURL(new RegExp(`#/write\\?pair=${pairId}$`))
+}
+
 async function approve(page: Page, title: string) {
   await as(page, 'operator', 'op1')
   await page.getByRole('link', { name: '审核', exact: true }).click()
@@ -76,7 +83,7 @@ test.beforeEach(async ({ page }) => {
 test('线上完整闭环：保存、审核、阅读、回信审核与持久化', async ({ page }) => {
   const title = '今天的云像一只小船', replyTitle = '我的天空是淡蓝色'
   await as(page, 'volunteer', 'v1')
-  await page.locator('main').getByRole('link', { name: '写一封信', exact: true }).click()
+  await openWrite(page, 'p1')
   await fillLetter(page, title, '小禾，你好！今天回来的路上，我发现云朵像一只小船，想把这件小事分享给你。你今天看到了什么颜色的天空呢？')
   await page.getByLabel('附上一道小谜语', { exact: false }).selectOption('r2')
   await page.getByRole('button', { name: '保存草稿', exact: true }).click()
@@ -224,7 +231,7 @@ test('暂停时仍可阅读和写草稿，恢复后孩子端不显示逾期评�
   await page.getByRole('button', { name: '确认暂停', exact: true }).click()
   await expect(pair.getByText('暂停中', { exact: true })).toBeVisible()
   await as(page, 'volunteer', 'v1')
-  await page.locator('main').getByRole('link', { name: '写一封信', exact: true }).click()
+  await openWrite(page, 'p1')
   await expect(page.getByText(/陪伴暂停中，可以写和保存草稿/)).toBeVisible()
   await expect(page.getByRole('button', { name: '检查并寄出', exact: true })).toBeDisabled()
   await as(page, 'child', 'c1')
@@ -244,7 +251,7 @@ test('暂停时仍可阅读和写草稿，恢复后孩子端不显示逾期评�
 test('演示日期驱动唯一逾期跟进，处理结果可回查', async ({ page }) => {
   const title = '请志愿者慢慢回应的合成来信'
   await as(page, 'child', 'c1')
-  await page.locator('main').getByRole('link', { name: '写一封信', exact: true }).click()
+  await openWrite(page, 'p1')
   await fillLetter(page, title, '林语，你好！这是用于验证成人回应期限的一封合成来信，有空时再写给我。')
   await submitLetter(page)
   await approve(page, title)
@@ -303,7 +310,7 @@ test('求助表单先选涉及对象，运营投诉可提交并交给独立保�
   await as(page, 'operator', 'op2')
   await page.goto(helpQueue)
   await expect(page.getByRole('heading', { name: '分派给我的保护个案', exact: true })).toBeVisible()
-  await page.getByRole('button').filter({ hasText: '受限保护个案' }).click()
+  await page.getByRole('button').filter({ hasText: '涉及：运营人员' }).click()
   await expect(page.getByRole('heading', { name: '保护个案', exact: true })).toBeVisible()
   await expect(page.getByText(/我想反映一位运营人员的处理方式/)).toBeVisible()
   if (process.env.PW_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.PW_EVIDENCE_DIR}/help-case-operator-complaint-${testInfo.project.name}.png`, fullPage: true })
@@ -393,3 +400,74 @@ test('写信与长信可访问，减少动态模式保持可阅读和可操作',
   const reading = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
   expect(reading.violations, JSON.stringify(reading.violations, null, 2)).toEqual([])
 })
+
+const operatorRoute = (page: Page, route: string) => `${new URL(page.url()).origin}/#${route}`
+
+test('风险信号经保护岗复核后保护性暂停，老师收到孩子的支持任务', async ({ page }) => {
+  await as(page, 'operator', 'op2')
+  await page.getByRole('link', { name: '保护', exact: true }).click()
+  const panel = page.locator('section[aria-label="风险信号"]')
+  await expect(panel.getByRole('heading', { name: '风险信号', exact: true })).toBeVisible()
+  const signal = panel.locator('article').filter({ hasText: '跨结对重复话术' })
+  await expect(signal).toHaveCount(1)
+  await signal.getByLabel('复核说明（至少 5 字）').fill('两组信件出现高度相似话术，先保护性暂停并联系孩子。')
+  await signal.getByRole('button', { name: '保护性暂停并建支持任务', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: '已保护性暂停该志愿者的活跃结对' })).toBeVisible()
+  await expect(panel.getByText('暂无待复核')).toBeVisible()
+
+  await as(page, 'teacher', 't1')
+  await expect(page.getByRole('heading', { name: '保护与异常', exact: true })).toBeVisible()
+  await expect(page.getByText('联系孩子，确认近况与需要的支持')).toBeVisible()
+  await page.getByLabel('已完成的支持动作').fill('已联系孩子，本周状态平稳，并由老师陪同继续写信。')
+  await page.getByRole('button', { name: '记录已完成', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: '支持任务已记录完成' })).toBeVisible()
+})
+
+test('争议先暂停交付，学校与平台双签名后才能恢复结对', async ({ page }) => {
+  const reason = '阿川这一组的纸信交付方式需要学校和平台共同确认。'
+  await as(page, 'operator', 'op3')
+  await page.goto(operatorRoute(page, '/operator/disputes'))
+  await expect(page.getByRole('heading', { name: '分歧要写下来，也要有双方签名。', exact: true })).toBeVisible()
+  await page.getByLabel('涉及哪组结对').selectOption('p2')
+  await page.getByLabel('议题').selectOption('delivery')
+  await page.getByLabel('分歧说明（至少 3 字）').fill(reason)
+  await page.getByRole('button', { name: '保存争议', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: '争议已保存' })).toBeVisible()
+
+  await as(page, 'teacher', 't2')
+  const teacherPair = page.locator('.operation-letter-row').filter({ hasText: '许舟' })
+  await expect(teacherPair).toContainText('已暂停')
+  const schoolCard = page.locator('section[aria-label="学校侧争议签名"] article').filter({ hasText: '纸质交付' })
+  await schoolCard.getByLabel('学校侧裁决方向').selectOption('uphold-school')
+  await schoolCard.getByLabel('学校签名理由').fill('学校已与家长沟通，同意继续按原方式交付。')
+  await schoolCard.getByRole('button', { name: '记录学校签名', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: '已记录学校侧签名' })).toBeVisible()
+  await expect(schoolCard.getByText('等待平台当值保护岗签名')).toBeVisible()
+
+  await as(page, 'operator', 'op1')
+  await page.goto(operatorRoute(page, '/operator/disputes'))
+  const platformCard = page.locator('section[aria-label="争议列表"] article').filter({ hasText: '纸质交付' })
+  await platformCard.getByLabel('平台侧裁决方向').selectOption('uphold-school')
+  await platformCard.getByLabel('平台签名理由').fill('平台已复核交付记录，同意学校方案。')
+  await platformCard.getByRole('button', { name: '记录平台签名', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: '已记录平台侧签名' })).toBeVisible()
+  await expect(platformCard.getByText('双方签名已完成')).toBeVisible()
+
+  await as(page, 'operator', 'op3')
+  await page.getByRole('link', { name: '结对', exact: true }).click()
+  const matchRow = page.locator('.pair-row').filter({ hasText: '阿川 ↔ 许舟' })
+  await matchRow.getByRole('button', { name: '恢复陪伴', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: '陪伴已恢复' })).toBeVisible()
+  await expect(matchRow).toContainText('陪伴中')
+})
+
+test('未完成培训的志愿者先完成培训，培训闸门才解除', async ({ page }) => {
+  await as(page, 'volunteer', 'v4')
+  const gate = page.getByTestId('volunteer-training-gate')
+  await expect(gate).toBeVisible()
+  await expect(gate.getByRole('heading', { name: '先完成本期行为边界培训', exact: true })).toBeVisible()
+  await gate.getByRole('button', { name: '完成培训', exact: true }).click()
+  await expect(page.getByRole('status').filter({ hasText: '培训记录已保存到此浏览器' })).toBeVisible()
+  await expect(page.getByTestId('volunteer-training-gate')).toHaveCount(0)
+})
+

@@ -8,7 +8,9 @@ import { ArrowRight, CheckCircle2, Clock3, Feather, HeartHandshake, Leaf, Mail, 
 import { canReadLetter, dispatch, formatDate, isOverdue, riddles, visibleLetters, groupedResponseTasks, recipientForLetter } from '../data'
 import { Avatar, BackLink, Badge, ContextLink, Empty, LetterBadge, LetterPaper, Notice, PageHeader, useAction, type PageProps } from '../ui'
 import { cloudConfigured, cloudLetter } from '../services/cloud'
+import { trainingFor } from '../policy'
 import type { Letter, Pair } from '../types'
+import { TRAINING_VERSION } from '../types'
 import './WorkflowV1.css'
 
 const roleHome = (role: string) => ({child: '信箱', volunteer: '陪伴任务', teacher: '收发任务', operator: '待处理'}[role] || '任务页')
@@ -83,7 +85,9 @@ function taskFromGroup(state: PageProps['state'], group: ReturnType<typeof group
 }
 
 export function VolunteerPage(props: PageProps) {
-  const {state, actor} = props
+  const {state, actor, notify} = props
+  const trainingRequired = !trainingFor(state, actor.id)
+  const {run: runTraining, busy: trainingBusy, error: trainingError} = useAction(notify)
   const pairs = activePairs(state, actor)
   const letters = visibleLetters(state, actor)
   const unreadIncoming = letters.filter(letter => letter.authorId !== actor.id && state.deliveries.some(delivery => delivery.letterId === letter.id && delivery.deliveredAt && !delivery.readAt))
@@ -119,6 +123,12 @@ export function VolunteerPage(props: PageProps) {
     <PageHeader eyebrow="陪伴任务" title={`${actor.nickname}，这次先做什么？`} description="先完成眼前这一步，再继续下一封信。">
       {!!pairs.length && <ContextLink className="btn secondary" to={newLetterPath} returnLabel="返回陪伴任务"><Plus size={17}/>写一封信</ContextLink>}
     </PageHeader>
+    {trainingRequired && <section className="panel stack" aria-label="需要完成培训" data-testid="volunteer-training-gate">
+      <h2>先完成本期行为边界培训</h2>
+      <p>培训说明通信边界、隐私保护和求助方式。完成前可以读来信、写草稿，但还不能提交信件。</p>
+      <button className="btn" type="button" disabled={trainingBusy} onClick={() => void runTraining(async () => { await dispatch(actor.id, {type: 'complete-training', version: TRAINING_VERSION}) }, '培训记录已保存到此浏览器；接下来可以提交第一封信。')}>{trainingBusy ? '正在保存…' : '完成培训'}</button>
+      {trainingError && <p className="field-error" role="alert">{trainingError}</p>}
+    </section>}
     <section className="v2-priority-card" aria-label="当前最需要处理的事">
       <p className="eyebrow">现在先做这件事</p>
       <h2>{priority.label}</h2>
@@ -285,6 +295,7 @@ function Editor({state, actor, notify, setDirty, registerSaveDraft, pair, existi
   const signature = JSON.stringify(values)
   const edited = signature !== baseline.current || !!file || removeAttachment || deliveryRoute !== defaultDeliveryRoute
   const recipient = state.people.find(person => person.id === (actor.role === 'volunteer' ? pair?.childId : pair?.volunteerId))
+  const trainingRequired = actor.role === 'volunteer' && !trainingFor(state, actor.id)
   const savedAttachment = state.letters.find(letter => letter.id === idRef.current)?.attachmentId || existing?.attachmentId
   const hasAttachment = !!file || !!savedAttachment && !removeAttachment
   const currentFileRef = useRef(file)
@@ -369,6 +380,7 @@ function Editor({state, actor, notify, setDirty, registerSaveDraft, pair, existi
     <div className="v2-compose-recipient"><Mail size={18}/><span>{recipient ? `写给 ${recipient.nickname}` : '尚未选择伙伴'}</span><small>{deliveryRoute === 'school-paper' ? '审核后由老师打印并实际交给孩子' : '审核后送到收件人的线上信箱'}</small></div>
     {existing?.moderation === 'returned' && <Notice tone="warning"><strong>审核建议：</strong>{existing.moderationNote} 原文还在，可以修改后重新提交。</Notice>}
     {pair?.status === 'paused' && <Notice>陪伴暂停中，可以写和保存草稿；恢复后再提交审核。</Notice>}
+    {trainingRequired && <Notice tone="warning">请先完成当前版本的行为边界培训，再提交信件。<Link className="text-button" to="/space">回到陪伴任务完成培训</Link></Notice>}
     <form className="v2-compose-form" onSubmit={handleSubmit(inspect)} aria-busy={busy}>
       <section className="panel compose-panel">
         {actor.role === 'volunteer' && !existing && <fieldset className="channel-options"><legend>这封信怎样送到孩子手中？</legend><label><input type="radio" name="deliveryRoute" value="online" checked={deliveryRoute === 'online'} onChange={() => setDeliveryRoute('online')}/><span><strong>线上信箱</strong><small>审核后在线可读。</small></span></label><label><input type="radio" name="deliveryRoute" value="school-paper" checked={deliveryRoute === 'school-paper'} onChange={() => setDeliveryRoute('school-paper')}/><span><strong>老师纸质交付</strong><small>审核、打印、实际交付和阅读分开记录。</small></span></label></fieldset>}
@@ -384,7 +396,7 @@ function Editor({state, actor, notify, setDirty, registerSaveDraft, pair, existi
         {values.riddleId && <p className="selected-riddle"><Leaf size={16}/>已选谜语：{riddles.find(riddle => riddle.id === values.riddleId)?.question}</p>}
       </section>
       {(error || autoError) && <div className="notice error" role="alert">{error || autoError}<p>输入仍在编辑区。若提示其他设备有修改，请先复制自己的内容，再重新打开这封信查看最新版本。</p></div>}
-      <div className="commit-bar"><div className="save-state" role="status"><Save size={15}/>{saveMessage}</div><div className="toolbar"><button className="btn secondary" type="button" disabled={busy || !!fileError} onClick={() => void persist(values)}><Save size={16}/>保存草稿</button><button className="btn" type="submit" disabled={busy || !pair || pair.status !== 'active' || !!fileError}><Send size={16}/>检查并寄出</button></div></div>
+      <div className="commit-bar"><div className="save-state" role="status"><Save size={15}/>{saveMessage}</div><div className="toolbar"><button className="btn secondary" type="button" disabled={busy || !!fileError} onClick={() => void persist(values)}><Save size={16}/>保存草稿</button><button className="btn" type="submit" disabled={busy || !pair || pair.status !== 'active' || !!fileError || trainingRequired}><Send size={16}/>检查并寄出</button></div></div>
       {!pair && <p className="muted small">还没结对，暂时不能寄出。{mode === 'demo' ? '草稿只保存在当前浏览器。' : '草稿保存在当前试测登录账号。'}</p>}
     </form>
     <dialog ref={previewDialog} className="confirm-dialog letter-preview-dialog" onCancel={() => setPreview(undefined)} aria-labelledby="preview-title"><div className="dialog-content"><div className="toolbar between"><h2 id="preview-title">寄出前，再看一眼</h2><button type="button" aria-label="关闭预览" onClick={() => {previewDialog.current?.close(); setPreview(undefined)}}><X size={22}/></button></div><p>写给{recipient?.nickname}。提交后进入运营审核，通过后才会送达。</p>{preview && <LetterPaper state={state} letter={pendingPreview}/>}<SelectedImage file={file}/>{error && <p role="alert" className="field-error">{error}</p>}<div className="toolbar"><button type="button" className="btn secondary" disabled={busy} onClick={() => {previewDialog.current?.close(); setPreview(undefined)}}>再改一改</button><button type="button" className="btn" disabled={busy} onClick={() => preview && void persist(preview, true)}><Send size={17}/>{busy ? '正在提交…' : '提交审核'}</button></div></div></dialog>
