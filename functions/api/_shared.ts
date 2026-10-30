@@ -39,7 +39,7 @@ export function errorResponse(error: unknown) {
     : ['INVALID_INPUT', 'INVALID_IMAGE', 'INVALID_ACTION'].includes(known?.code || '') ? 400
     : known?.code === 'UPLOAD_QUOTA' || known?.code === 'IMAGE_TOO_LARGE' ? 413
     : known?.code === 'RATE_LIMITED' ? 429
-    : known?.code === 'V3_PREVIEW_DISABLED' || known?.code === 'SCHEMA_NOT_READY' || known?.code === 'MEDIA_NOT_CONFIGURED' || known?.code === 'STORAGE_FAILED' ? 503
+    : known?.code === 'V3_PREVIEW_DISABLED' || known?.code === 'SCHEMA_NOT_READY' || known?.code === 'MEDIA_NOT_CONFIGURED' || known?.code === 'STORAGE_FAILED' || known?.code === 'AUDIT_UNAVAILABLE' ? 503
     : 500
   const message = known?.message || '请求暂时没有完成，请保留内容后重试'
   return jsonResponse({ error: { code: known?.code || 'INTERNAL_ERROR', message } }, status)

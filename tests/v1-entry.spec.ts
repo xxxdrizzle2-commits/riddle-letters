@@ -13,19 +13,18 @@ test('首页四个身份入口都能直接进入可操作演示', async ({ page 
   await expect(page.getByText('合成数据演示 · 仅当前浏览器保存')).toBeVisible()
 })
 
-test('未结对孩子可先写自我介绍，刷新后仍能接着写', async ({ page }) => {
+test('未结对孩子不能创建收件人不明的信', async ({ page }) => {
   await page.goto('/#/demo/start/child')
   await expect(page).toHaveURL(/#\/space/)
   await page.locator('summary').filter({ hasText: '演示设置' }).click()
   await page.getByLabel('演示人物', { exact: true }).selectOption('c3')
   await page.locator('summary').filter({ hasText: '演示设置' }).click()
   await page.locator('main').getByRole('link', { name: '写一封信', exact: true }).click()
-  await page.getByLabel('想说的话').fill('你好，我喜欢画画，也喜欢猜关于小动物的谜语。')
-  await page.getByRole('button', { name: '保存草稿' }).click()
-  await expect(page.getByRole('status').filter({ hasText: '已保存到此浏览器' }).first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: '结对后才能写给伙伴', exact: true })).toBeVisible()
+  await expect(page.getByText('为避免信件送错人，暂时不创建收件人不明的信。', { exact: false })).toBeVisible()
+  await expect(page.getByLabel('想说的话')).toHaveCount(0)
   await page.reload()
-  await expect(page.getByLabel('想说的话')).toHaveValue('你好，我喜欢画画，也喜欢猜关于小动物的谜语。')
-  await expect(page.getByRole('button', { name: '检查并寄出' })).toBeDisabled()
+  await expect(page.getByRole('heading', { name: '结对后才能写给伙伴', exact: true })).toBeVisible()
 })
 
 test('旧登录地址不伪装账号，退出演示回到身份选择', async ({ page }) => {
@@ -61,7 +60,7 @@ test('未保存的信拦截浏览器后退，可保存后离开并继续写', as
   await expect(page).toHaveURL(/#\/space$/)
   await expect(page.locator('main').getByRole('link', { name: '接着写', exact: true })).toBeVisible()
   await page.goForward()
-  await expect(page).toHaveURL(/#\/write$/)
+  await expect(page).toHaveURL(/#\/write\?pair=p1$/)
   await expect(page.getByLabel('想说的话')).toHaveValue('这封信还没有保存，我想离开前确认内容不会消失。')
 })
 
@@ -98,10 +97,6 @@ test('刷新或直接打开审核详情时，返回目的地仍清楚并回到�
 test('从运营首页进入结对任务后，返回名称指向结对列表', async ({ page }) => {
   await page.goto('/#/demo/start/operator')
   await expect(page).toHaveURL(/#\/space/)
-  await page.getByRole('link', { name: '跟进', exact: true }).click()
-  await page.getByRole('button').filter({ hasText: '书信回应进度' }).filter({ hasText: '阿川' }).click()
-  await page.getByLabel('处理结果与下一步', { exact: true }).fill('已在演示中了解情况，后续继续跟进。')
-  await page.getByRole('button', { name: '保存处理结果', exact: true }).click()
   await page.getByRole('link', { name: '审核', exact: true }).click()
   await page.getByRole('button', { name: /你的纸船，开到了哪里/ }).click()
   await page.getByRole('button', { name: '通过审核', exact: true }).click()

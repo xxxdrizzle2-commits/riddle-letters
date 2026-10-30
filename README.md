@@ -1,12 +1,13 @@
 # 谜语书信陪伴平台
 
-四角色书信陪伴网站。**当前交付版本为 V3 最小可运行版本（MVP）**，功能冻结点为 [`v3.2-mvp`](https://github.com/xxxdrizzle2-commits/riddle-letters/tree/v3.2-mvp)。源码同时支持浏览器本地的 V2 合成数据演示，以及使用四个成人合成账号的 V3 云端试测。验收范围、证据和限制见 [MVP 冻结验收记录](./docs/MVP-冻结验收清单.md)。
+四角色书信陪伴网站。**当前已部署并冻结的交付版本仍是 V3.2 成人合成身份 MVP**，功能冻结点为 [`v3.2-mvp`](https://github.com/xxxdrizzle2-commits/riddle-letters/tree/v3.2-mvp)，其验收范围、证据和限制见 [MVP 冻结验收记录](./docs/MVP-冻结验收清单.md)。当前工作分支 `business-safety-first-increment` 正在实现 N:N 独立结对、学校老师授权、受限保护个案、敏感读取审计及手写信合成交互；**这些增量尚未部署，也不代表具备真实儿童试点条件**。
 
 ## 版本与站点
 
 | 版本 | 地址与分支 | 数据和用途 |
 | --- | --- | --- |
-| V3 MVP 成人试测 | [riddle-letters-v3.pages.dev](https://riddle-letters-v3.pages.dev/)；从 `dev` 手动部署 | 独立 Cloudflare Pages 项目，使用 Pages Functions、D1 和 Better Auth。四个成人分别使用预置合成账号，服务端检查角色权限及数据范围；信件和状态在账号间共享。 |
+| V3.2 冻结成人试测 | [riddle-letters-v3.pages.dev](https://riddle-letters-v3.pages.dev/)；历史上从 `dev` 手动部署 | 独立 Cloudflare Pages 项目，使用 Pages Functions、D1 和 Better Auth。已部署站点仍按冻结验收的四个成人合成账号理解；不得从当前工作树推断线上已更新。 |
+| 业务安全增量（仅本地） | `business-safety-first-increment` | 使用成人合成身份与合成书信验证 N:N、限期老师指派、逐封路线、独立保护值守、逐对象读取与手写信双视图；没有发布到生产或 Preview。 |
 | V2 Demo | [riddle-letters.pages.dev](https://riddle-letters.pages.dev/)；从 `main` 自动部署 | 使用默认 `npm run build`，在当前浏览器的 IndexedDB 保存合成数据，可切换小朋友、志愿者、老师和运营演示身份。身份切换不代表正式认证。 |
 
 GitHub 默认分支 `main` 已同步 V3 MVP 源码，`dev` 保留为 V3 试测站的手动部署来源。**分支包含同一套源码，不表示两个网址运行同一模式或共用数据。**V3 仅在 `npm run build:v3-preview` 且服务端配置齐全时启用云端账号；V2 站点仍使用默认构建和本地演示数据。
@@ -15,7 +16,7 @@ V3 的主要路径是结对、双方写信、人工审核、线上或老师协�
 
 V3 网页外壳可直接打开，进入角色后仍须用试测账号登录；当前不依赖 Cloudflare Access 作为使用者登录步骤。账号资料保存在仓库外，禁止提交密码、会话或真实儿童资料。试测只使用虚构人物和合成书信；真实儿童接入、监护授权及正式运营不属于当前 MVP。
 
-第一增量的业务与法律边界见[业务与儿童保护边界](./docs/业务与儿童保护边界-第一阶段.md)。Cloudflare Pages 项目 `riddle-letters-v3` 的生产分支为 `dev`；Preview 使用独立的 `riddle-letters-v3-business-preview` D1，不能把生产 D1 作为 Preview 测试库。`wrangler.v3-preview.jsonc` 是本地开发配置，其 `name` 不是 Pages 项目名；部署前仍须核对 Pages 项目、环境绑定及目标分支。V2 项目 `riddle-letters` 不参与 V3 Preview 部署。
+法律与业务决策草案见[第一阶段边界](./docs/业务与儿童保护边界-第一阶段.md)，当前实验分支的实际落点及未完成项见[第二阶段实现与回滚](./docs/业务与儿童保护边界-第二阶段实现与回滚.md)。Cloudflare Pages 项目 `riddle-letters-v3` 的历史生产分支为 `dev`；任何未来 Preview 必须使用独立 D1/R2，不能把生产资源作为测试库。`wrangler.v3-preview.jsonc` 是本地开发配置，其 `name` 不是 Pages 项目名；发布前仍须实际核对 Pages 项目、环境绑定及目标分支。V2 项目 `riddle-letters` 不参与 V3 Preview 部署。
 
 ## 本地运行
 
@@ -34,7 +35,7 @@ npm run dev
 运行本地 V3 Pages Functions 与**本机 D1**：
 
 1. 将 `.dev.vars.example` 复制为 `.dev.vars`，设置本机随机的 `BETTER_AUTH_SECRET`（至少 32 个随机字符）。不要提交 `.dev.vars`。
-2. 执行以下命令，为本机 D1 建表并按提示创建四个成人合成账号：
+2. 执行以下命令，为本机 D1 建表并按提示创建五个成人合成账号。五个账号仍对应四种前台角色，其中两个运营账号用于验证普通运营与独立保护值守的回避：
 
 ```powershell
 npm run db:v3-preview:migrate
@@ -55,12 +56,14 @@ npm run e2e
 
 `npm run build` 构建 V2 本地 Demo；`npm run build:v3-preview` 使用 `v3-preview` 模式构建 V3 前端并检查 Functions/服务端类型。`npm run e2e` 在本地 Vite 服务上运行桌面和手机视口 Playwright 场景，**不是 V3 真实登录、D1 或跨设备测试**。V3 云端闭环和权限使用四个独立账号验证，证据与局限记录在冻结验收清单。首次运行 Playwright 如缺少浏览器，可执行 `npx playwright install chromium --only-shell`。
 
-## 当前 MVP 边界
+## 当前边界
 
-- V3 试测提供文字书信与老师文字代录。云端图片上传、R2 私有附件和图片转换链尚未配置完成，写信页隐藏上传入口；仓库中的媒体服务代码不等于线上已启用。
+- 冻结 V3.2 站点只按其历史验收范围理解。当前实验分支已经在领域模型、页面和隔离 D1 迁移中加入 N:N 独立 Pair、学校与限期老师指派、逐封投递路线、独立 `HelpCase`、逐对象敏感读取审计及投递事件；这不是线上功能声明。
+- 浏览器本地演示可用**成年合成图片**走通“私有原稿占位—人工忠实转写—独立获准展示副本—互斥双视图”的交互，并要求文字与图像两项确认。它没有真实的图像遮盖、二维码检测或自动 OCR 放行能力，不能用于真实儿童材料。
+- `scripts/ocr-offline.py` 只用于在 D 盘任务目录规范化可选 PaddleOCR 输出；不会自动安装模型，也不会把识别结果自动送达。正式 R2 私有原稿、受控 OCR 服务、不可逆图像遮盖和云端跨账号联调仍未完成。
 - 不开放公众注册、真实儿童账号或儿童数据。志愿者公开申请、邮箱验证、邀请激活、找回密码等正式账号流程尚未交付。
 - 内置谜语可供写信时选用；申报书提出的 300+ 谜语库、AI 推荐、AI 写作和情感分析不属于当前已实现功能。
 - 早期未启用的 CloudBase 原型已从最终 MVP 工作树移除，历史仍可从 Git 读取。V3 实际后端路径是 `functions/api/`、`server/core.ts`、`server/d1-repository.ts` 和 `migrations/`。
 - Cloudflare Pages 代码回滚不会自动回滚 D1 数据。数据清理、迁移与重新播种应先备份，并在冻结清单里记录。
 
-如需再次核对操作，可使用 [V3 成人复测任务单](./docs/V3-成人试测任务单.md)。冻结 MVP 已用预设的四个合成账号完成内部验证，发布不以邀请更多试用者为条件。
+如需复核冻结基线，可使用 [V3 成人复测任务单](./docs/V3-成人试测任务单.md)。当前实验增量只使用本地成人合成数据；任何真实儿童资料采集、公开试用、Preview 或生产部署都需要另行授权，并先完成学校与法律专业人员要求的书面确认。

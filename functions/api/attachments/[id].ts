@@ -1,4 +1,4 @@
-import { authorizeAttachment } from '../../../server/core'
+import { executeAttachmentContentRead } from '../../../server/core'
 import { attachmentForDeletion, assertDeleteMarker } from '../../../server/media-policy'
 import { ServiceError } from '../../../server/core'
 import { errorResponse, identityFor, jsonResponse, repositoryFor, requireSameOrigin } from '../_shared'
@@ -13,7 +13,7 @@ export const onRequestGet: PagesFunction<V3Env> = async context => {
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new ServiceError('NOT_FOUND', '图片不存在')
     const variant = assertVariant(new URL(context.request.url).searchParams.get('variant'))
     const repository = repositoryFor(context.env)
-    const attachment = await repository.read(store => authorizeAttachment(store, identity, id))
+    const attachment = await executeAttachmentContentRead(repository, identity, id)
     if (!attachment.storagePath || !attachment.storagePath.startsWith('attachments/')) throw new ServiceError('NOT_FOUND', '图片不存在')
     const object = await bucket.get(attachment.storagePath)
     if (!object || object.size > 3 * 1024 * 1024) throw new ServiceError('NOT_FOUND', '图片不存在或已清理')

@@ -1,4 +1,4 @@
-import { emptyStore, ServiceError, type Repository, type Store } from './core'
+import { emptyStore, ServiceError, type AccessAuditEvent, type Repository, type Store } from './core'
 
 type SqlRow = Record<string, string | number | null>
 export interface D1Statement {
@@ -18,6 +18,8 @@ const specs: Record<string, TableSpec> = {
   invites: { table: 'app_invites', primaryColumns: ['id'] },
   consents: { table: 'app_consents', primaryColumns: ['id'] },
   privacyRequests: { table: 'app_privacy_requests', primaryColumns: ['id'] },
+  schools: { table: 'app_schools', primaryColumns: ['id'] },
+  teacherAssignments: { table: 'app_teacher_assignments', primaryColumns: ['id'] },
   people: { table: 'app_people', primaryColumns: ['id'] },
   pairs: { table: 'app_pairs', primaryColumns: ['id'] },
   letters: { table: 'app_letters', primaryColumns: ['id'] },
@@ -26,9 +28,14 @@ const specs: Record<string, TableSpec> = {
   tasks: { table: 'app_reply_tasks', primaryColumns: ['id'] },
   reviews: { table: 'app_reviews', primaryColumns: ['id'] },
   followups: { table: 'app_followups', primaryColumns: ['id'] },
+  helpCases: { table: 'app_help_cases', primaryColumns: ['id'] },
+  deliveryEvents: { table: 'app_delivery_events', primaryColumns: ['id'] },
+  manuscriptAssets: { table: 'app_manuscript_assets', primaryColumns: ['id'] },
+  ocrRuns: { table: 'app_ocr_runs', primaryColumns: ['id'] },
   attachments: { table: 'app_attachments', primaryColumns: ['id'] },
   receipts: { table: 'app_receipts', primaryColumns: ['actor_id', 'request_id'] },
   audit: { table: 'app_audit_events', primaryColumns: ['id'] },
+  accessAudit: { table: 'app_access_audit_events', primaryColumns: ['id'] },
   rates: { table: 'app_rate_limits', primaryColumns: ['rate_key'] },
 }
 
@@ -46,11 +53,13 @@ function recordsFor(store: Store): Record<string, Map<string, Row>> {
   simple('invites', store.invites, item => item.id, item => ({ id: item.id, token_hash: item.tokenHash, status: item.status, created_by: item.createdBy, expires_at: item.expiresAt, data_json: json(item) }))
   simple('consents', store.consents, item => item.id, item => ({ id: item.id, child_id: item.childId ?? null, teacher_id: item.teacherId, data_json: json(item) }))
   simple('privacyRequests', store.privacyRequests, item => item.id, item => ({ id: item.id, user_id: item.userId, status: item.status, data_json: json(item) }))
+  simple('schools', store.state.schools ?? [], item => item.id, item => ({ id: item.id, name: item.name, status: item.status, data_json: json(item) }))
+  simple('teacherAssignments', store.state.teacherAssignments ?? [], item => item.id, item => ({ id: item.id, school_id: item.schoolId, teacher_id: item.teacherId, child_id: item.childId ?? null, scope_json: json(item.scope), starts_at: item.startsAt, ends_at: item.endsAt ?? null, revoked_at: item.revokedAt ?? null, approved_by: item.approvedBy, data_json: json(item) }))
   simple('people', store.state.people, item => item.id, item => ({ id: item.id, role: item.role, nickname: item.nickname, teacher_id: item.teacherId ?? null, account_status: item.accountStatus ?? null, data_json: json(item) }))
-  simple('pairs', store.state.pairs, item => item.id, item => ({ id: item.id, child_id: item.childId, volunteer_id: item.volunteerId, teacher_id: item.teacherId, channel: item.channel, status: item.status, data_json: json(item) }))
+  simple('pairs', store.state.pairs, item => item.id, item => ({ id: item.id, child_id: item.childId, volunteer_id: item.volunteerId, teacher_id: item.teacherId, school_id: item.schoolId ?? null, channel: item.channel, status: item.status, data_json: json(item) }))
   simple('letters', store.state.letters, item => item.id, item => {
     const { submissionVersions: _versions, ...current } = item
-    return { id: item.id, pair_id: item.pairId, author_id: item.authorId, recipient_id: item.recipientId ?? null, created_by: item.createdBy, reply_to: item.replyTo ?? null, moderation: item.moderation, updated_at: item.updatedAt, data_json: json(current) }
+    return { id: item.id, pair_id: item.pairId, author_id: item.authorId, recipient_id: item.recipientId ?? null, created_by: item.createdBy, reply_to: item.replyTo ?? null, moderation: item.moderation, delivery_route: item.deliveryRoute ?? null, updated_at: item.updatedAt, data_json: json(current) }
   })
   const versions: Row[] = store.state.letters.flatMap(letter => (letter.submissionVersions ?? []).map(version => {
     const columns = { letter_id: letter.id, revision: version.revision, submitted_at: version.submittedAt, data_json: json(version) }
@@ -61,6 +70,10 @@ function recordsFor(store: Store): Record<string, Map<string, Row>> {
   simple('tasks', store.state.tasks, item => item.id, item => ({ id: item.id, letter_id: item.letterId, pair_id: item.pairId, recipient_id: item.recipientId ?? null, status: item.status, due_at: item.dueAt, data_json: json(item) }))
   simple('reviews', store.state.reviews, item => item.id, item => ({ id: item.id, letter_id: item.letterId, operator_id: item.operatorId, decision: item.decision, created_at: item.createdAt, data_json: json(item) }))
   simple('followups', store.state.followups, item => item.id, item => ({ id: item.id, pair_id: item.pairId ?? null, task_id: item.taskId ?? null, requester_id: item.requesterId ?? null, owner_id: item.ownerId ?? null, kind: item.kind, status: item.status, next_followup_at: item.nextFollowupAt ?? null, data_json: json(item) }))
+  simple('helpCases', store.state.helpCases ?? [], item => item.id, item => ({ id: item.id, requester_id: item.requesterId, owner_id: item.ownerId, backup_owner_id: item.backupOwnerId ?? null, school_owner_id: item.schoolOwnerId ?? null, status: item.status, created_at: item.createdAt, data_json: json(item) }))
+  simple('deliveryEvents', store.state.deliveryEvents ?? [], item => item.id, item => ({ id: item.id, letter_id: item.letterId, type: item.type, actor_id: item.actorId, created_at: item.at, data_json: json(item) }))
+  simple('manuscriptAssets', store.state.manuscriptAssets ?? [], item => item.id, item => ({ id: item.id, letter_id: item.letterId, kind: item.kind, storage_path: item.storagePath ?? null, sha256: item.sha256 ?? null, created_at: item.createdAt, data_json: json(item) }))
+  simple('ocrRuns', store.state.ocrRuns ?? [], item => item.id, item => ({ id: item.id, letter_id: item.letterId, manuscript_asset_id: item.manuscriptAssetId, status: item.status, source_sha256: item.sourceSha256, started_at: item.startedAt, data_json: json(item) }))
   simple('attachments', store.state.attachments, item => item.id, item => {
     const { blob: _blob, ...metadata } = item
     return { id: item.id, pair_id: item.pairId ?? null, owner_id: item.ownerId ?? null, storage_path: item.storagePath ?? null, size: item.size ?? null, data_json: json(metadata) }
@@ -71,12 +84,21 @@ function recordsFor(store: Store): Record<string, Map<string, Row>> {
     return { actor_id: actorId, request_id: requestId, payload_hash: item.value.hash, result_id: item.value.resultId, created_at: item.value.at }
   })
   simple('audit', store.audit, item => item.id, item => ({ id: item.id, actor_id: item.actorId, action: item.action, target_id: item.targetId ?? null, created_at: item.at }))
+  simple('accessAudit', store.accessAudit, item => item.id, item => ({ id: item.id, actor_id: item.actorId, target_type: item.targetType, target_id: item.targetId, decision: item.decision, created_at: item.at, data_json: json(item) }))
   simple('rates', Object.entries(store.rates).map(([rateKey, value]) => ({ rateKey, ...value })), item => item.rateKey, item => ({ rate_key: item.rateKey, minute: item.minute, count: item.count }))
   return result
 }
 
 export class D1Repository implements Repository {
   constructor(private readonly db: D1DatabaseLike) {}
+
+  async appendAccessAudit(event: AccessAuditEvent): Promise<void> {
+    try {
+      await this.db.batch([this.db.prepare('INSERT INTO app_access_audit_events (id, actor_id, target_type, target_id, decision, created_at, data_json) VALUES (?, ?, ?, ?, ?, ?, ?)').bind(event.id, event.actorId, event.targetType, event.targetId, event.decision, event.at, json(event))])
+    } catch {
+      throw new ServiceError('AUDIT_UNAVAILABLE', '读取记录未能保存，请稍后重试')
+    }
+  }
 
   private async load(): Promise<Store> {
     const names = Object.keys(specs)
@@ -96,6 +118,8 @@ export class D1Repository implements Repository {
     store.invites = list<Store['invites'][number]>('invites')
     store.consents = list<Store['consents'][number]>('consents')
     store.privacyRequests = list<Store['privacyRequests'][number]>('privacyRequests')
+    store.state.schools = list<NonNullable<Store['state']['schools']>[number]>('schools')
+    store.state.teacherAssignments = list<NonNullable<Store['state']['teacherAssignments']>[number]>('teacherAssignments')
     store.state.people = list<Store['state']['people'][number]>('people')
     store.state.pairs = list<Store['state']['pairs'][number]>('pairs')
     const versions = new Map<string, Store['state']['letters'][number]['submissionVersions']>()
@@ -109,9 +133,14 @@ export class D1Repository implements Repository {
     store.state.tasks = list<Store['state']['tasks'][number]>('tasks')
     store.state.reviews = list<Store['state']['reviews'][number]>('reviews')
     store.state.followups = list<Store['state']['followups'][number]>('followups')
+    store.state.helpCases = list<NonNullable<Store['state']['helpCases']>[number]>('helpCases')
+    store.state.deliveryEvents = list<NonNullable<Store['state']['deliveryEvents']>[number]>('deliveryEvents')
+    store.state.manuscriptAssets = list<NonNullable<Store['state']['manuscriptAssets']>[number]>('manuscriptAssets')
+    store.state.ocrRuns = list<NonNullable<Store['state']['ocrRuns']>[number]>('ocrRuns')
     store.state.attachments = list<Store['state']['attachments'][number]>('attachments')
     store.receipts = Object.fromEntries((tables.receipts ?? []).map(row => [`${row.actor_id}:${row.request_id}`, { hash: String(row.payload_hash), resultId: String(row.result_id), at: String(row.created_at) }]))
     store.audit = (tables.audit ?? []).map(row => ({ id: String(row.id), actorId: String(row.actor_id), action: String(row.action), targetId: row.target_id == null ? undefined : String(row.target_id), at: String(row.created_at) }))
+    store.accessAudit = list<Store['accessAudit'][number]>('accessAudit')
     store.rates = Object.fromEntries((tables.rates ?? []).map(row => [String(row.rate_key), { minute: Number(row.minute), count: Number(row.count) }]))
     return store
   }

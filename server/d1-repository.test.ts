@@ -37,10 +37,37 @@ function freshDatabase() {
   db.exec('PRAGMA foreign_keys = ON')
   db.exec(readFileSync('migrations/0000_better_auth.sql', 'utf8'))
   db.exec(readFileSync('migrations/0001_v3_core.sql', 'utf8'))
+  db.exec(readFileSync('migrations/0002_v3_reply_task_letter_index.sql', 'utf8'))
+  db.exec(readFileSync('migrations/0003_business_safety.sql', 'utf8'))
   return db
 }
 
 describe('V3 D1 repository', () => {
+  it('prevents two simultaneous active pair rows for the same child and volunteer', () => {
+    const database = freshDatabase()
+    try {
+      const base = { child_id: 'c', volunteer_id: 'v', teacher_id: 't', channel: 'online', status: 'active', data_json: '{}' }
+      database.prepare('INSERT INTO app_pairs (id, child_id, volunteer_id, teacher_id, channel, status, data_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run('first', base.child_id, base.volunteer_id, base.teacher_id, base.channel, base.status, base.data_json)
+      expect(() => database.prepare('INSERT INTO app_pairs (id, child_id, volunteer_id, teacher_id, channel, status, data_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run('second', base.child_id, base.volunteer_id, base.teacher_id, base.channel, base.status, base.data_json)).toThrow()
+      database.prepare("UPDATE app_pairs SET status = 'ended' WHERE id = 'first'").run()
+      expect(() => database.prepare('INSERT INTO app_pairs (id, child_id, volunteer_id, teacher_id, channel, status, data_json) VALUES (?, ?, ?, ?, ?, ?, ?)').run('second', base.child_id, base.volunteer_id, base.teacher_id, base.channel, base.status, base.data_json)).not.toThrow()
+    } finally { database.close() }
+  })
+
+  it('keeps sensitive read audits append-only outside the capped write-operation log', async () => {
+    const database = freshDatabase()
+    try {
+      const repository = createD1Repository(new SqliteD1(database))
+      expect(repository.appendAccessAudit).toBeTypeOf('function')
+      await repository.appendAccessAudit!({ id: 'read-1', actorId: 'teacher-1', targetType: 'letter', targetId: 'letter-1', decision: 'allowed', purpose: 'paper-print-task', versionId: 'letter-1:2', approvalId: 'review-1', at: '2026-10-21T00:00:00.000Z' })
+      const row = database.prepare('SELECT actor_id, target_type, target_id, decision, data_json FROM app_access_audit_events WHERE id = ?').get('read-1') as Record<string, unknown>
+      expect(row).toMatchObject({ actor_id: 'teacher-1', target_type: 'letter', target_id: 'letter-1', decision: 'allowed' })
+      expect(JSON.parse(String(row.data_json))).toMatchObject({ purpose: 'paper-print-task', versionId: 'letter-1:2', approvalId: 'review-1' })
+      expect(() => database.prepare('UPDATE app_access_audit_events SET decision = ? WHERE id = ?').run('denied', 'read-1')).toThrow(/append-only/)
+      expect(() => database.prepare('DELETE FROM app_access_audit_events WHERE id = ?').run('read-1')).toThrow(/append-only/)
+    } finally { database.close() }
+  })
+
   it('persists scoped business commands and makes retries idempotent', async () => {
     const database = freshDatabase()
     try {

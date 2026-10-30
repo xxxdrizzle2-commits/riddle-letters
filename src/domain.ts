@@ -1,4 +1,4 @@
-import type { AppState, Attachment, Command, Letter, Person, ReplyTask, Riddle, TimeInterval } from './types'
+import type { AppState, Attachment, Command, DeliveryRoute, HelpCase, Letter, Person, ReplyTask, Riddle, TeacherScope, TimeInterval } from './types'
 
 const DAY = 86_400_000
 export const riddles: Riddle[] = [
@@ -20,19 +20,26 @@ export function createSeedState(): AppState {
   return {
     id: 'main', version: 1, clock: '2026-10-19T09:00:00+08:00',
     people: [
-      { id: 'c1', role: 'child', nickname: '小禾', subtitle: '喜欢收集秋天的小发现', avatar: '🌱', interests: ['画画', '植物', '猜谜'] },
-      { id: 'c2', role: 'child', nickname: '阿川', subtitle: '想知道更多关于星空的事', avatar: '⛵', interests: ['星空', '折纸', '足球'] },
-      { id: 'c3', role: 'child', nickname: '芽芽', subtitle: '等待认识一位书信伙伴', avatar: '🌻', interests: ['故事', '小动物'] },
+      { id: 'c1', role: 'child', schoolId: 'school-a', nickname: '小禾', subtitle: '喜欢收集秋天的小发现', avatar: '🌱', interests: ['画画', '植物', '猜谜'] },
+      { id: 'c2', role: 'child', schoolId: 'school-b', nickname: '阿川', subtitle: '想知道更多关于星空的事', avatar: '⛵', interests: ['星空', '折纸', '足球'] },
+      { id: 'c3', role: 'child', schoolId: 'school-a', nickname: '芽芽', subtitle: '等待认识一位书信伙伴', avatar: '🌻', interests: ['故事', '小动物'] },
       { id: 'v1', role: 'volunteer', nickname: '林语', subtitle: '大学生志愿者 · 爱读故事和散步', avatar: '🍃', interests: ['阅读', '植物'] },
       { id: 'v2', role: 'volunteer', nickname: '许舟', subtitle: '大学生志愿者 · 喜欢仰望星空', avatar: '🪁', interests: ['天文', '运动'] },
       { id: 'v3', role: 'volunteer', nickname: '苏宁', subtitle: '大学生志愿者 · 已完成演示审核', avatar: '🌼', interests: ['故事', '小动物'] },
-      { id: 't1', role: 'teacher', nickname: '陈老师', subtitle: '协助小禾和芽芽收发书信', avatar: '📚', interests: [] },
-      { id: 't2', role: 'teacher', nickname: '周老师', subtitle: '协助阿川收发纸质书信', avatar: '📖', interests: [] },
-      { id: 'op1', role: 'operator', nickname: '小满', subtitle: '陪伴计划运营 · 守护每一次交流', avatar: '✉️', interests: [] },
+      { id: 't1', role: 'teacher', schoolId: 'school-a', nickname: '陈老师', subtitle: '协助小禾和芽芽收发书信', avatar: '📚', interests: [] },
+      { id: 't2', role: 'teacher', schoolId: 'school-b', nickname: '周老师', subtitle: '协助阿川收发纸质书信', avatar: '📖', interests: [] },
+      { id: 'op1', role: 'operator', nickname: '小满', subtitle: '陪伴计划运营 · 守护每一次交流', avatar: '✉️', interests: [], permissions: ['review', 'safeguarding', 'administration'] },
+      { id: 'op2', role: 'operator', nickname: '独立保护值守', subtitle: '合成身份 · 独立受理涉及运营的求助', avatar: '🛡️', interests: [], accountStatus: 'active', permissions: ['safeguarding', 'independentSafeguarding'] },
+    ],
+    schools: [{ id: 'school-a', name: '演示学校甲', status: 'active' }, { id: 'school-b', name: '演示学校乙', status: 'active' }],
+    teacherAssignments: [
+      { id: 'assignment-c1', schoolId: 'school-a', teacherId: 't1', childId: 'c1', scope: ['status', 'capture', 'paper-delivery'], startsAt: '2026-09-01T00:00:00+08:00', approvedBy: 'synthetic-school-a' },
+      { id: 'assignment-c3', schoolId: 'school-a', teacherId: 't1', childId: 'c3', scope: ['status', 'capture', 'paper-delivery'], startsAt: '2026-09-01T00:00:00+08:00', approvedBy: 'synthetic-school-a' },
+      { id: 'assignment-c2', schoolId: 'school-b', teacherId: 't2', childId: 'c2', scope: ['status', 'capture', 'paper-delivery'], startsAt: '2026-09-01T00:00:00+08:00', approvedBy: 'synthetic-school-b' },
     ],
     pairs: [
-      { id: 'p1', childId: 'c1', volunteerId: 'v1', teacherId: 't1', channel: 'online', status: 'active', startedAt: '2026-09-01T09:00:00+08:00' },
-      { id: 'p2', childId: 'c2', volunteerId: 'v2', teacherId: 't2', channel: 'paper', status: 'active', startedAt: '2026-09-01T09:00:00+08:00' },
+      { id: 'p1', childId: 'c1', volunteerId: 'v1', teacherId: 't1', schoolId: 'school-a', channel: 'online', status: 'active', startedAt: '2026-09-01T09:00:00+08:00' },
+      { id: 'p2', childId: 'c2', volunteerId: 'v2', teacherId: 't2', schoolId: 'school-b', channel: 'paper', status: 'active', startedAt: '2026-09-01T09:00:00+08:00' },
     ],
     letters: [
       { id: 'l1', pairId: 'p1', authorId: 'v1', createdBy: 'v1', title: '把秋天装进信封里', body: '小禾，你好呀！\n\n今天散步时，我发现一片叶子很像一只小小的手掌。树叶的边缘变成了金黄色，中间还留着一点绿。我把它夹进了书里，想把这个小发现告诉你。\n\n你上次画的那棵树，我很喜欢。它的枝条伸向不同的方向，像是在认真听风说话。最近你有没有见到什么有意思的颜色？可以画下来，也可以慢慢写给我。\n\n这次还带来一道小谜语。猜不出来也没关系，我们下封信一起聊。愿你有一个自在的下午。\n\n你的书信伙伴 林语', riddleId: 'r1', moderation: 'approved', createdAt: '2026-10-16T09:00:00+08:00', updatedAt: '2026-10-17T09:00:00+08:00' },
@@ -52,7 +59,7 @@ export function createSeedState(): AppState {
       { id: 'task-l6', letterId: 'l6', pairId: 'p2', dueAt: '2026-10-15T09:00:00+08:00', status: 'awaiting' },
     ],
     reviews: [{ id: 'review-l5', letterId: 'l5', operatorId: 'op1', decision: 'returned', note: '请把“每周都要写完”的表达调整为更轻松的邀请，给伙伴充分的选择和时间。', createdAt: '2026-10-16T09:00:00+08:00' }],
-    followups: [{ id: 'overdue-task-l6', pairId: 'p2', taskId: 'task-l6', kind: 'overdue', status: 'open', note: '阿川的回信尚未收到，请先了解收发情况，给予充分的时间。', createdAt: '2026-10-16T09:00:00+08:00', updatedAt: '2026-10-16T09:00:00+08:00' }], attachments: [],
+    followups: [], helpCases: [], deliveryEvents: [], manuscriptAssets: [], ocrRuns: [], attachments: [],
   }
 }
 
@@ -69,7 +76,66 @@ const uid = (prefix: string) => `${prefix}-${crypto.randomUUID()}`
 const addDays = (iso: string, days: number) => new Date(Date.parse(iso) + days * DAY).toISOString()
 export const hasPermission = (actor: Person, permission: NonNullable<Person['permissions']>[number]) => actor.role === 'operator' && (!actor.permissions || actor.permissions.includes(permission))
 const canHandleHelp = (actor: Person, followup: AppState['followups'][number]) =>
-  hasPermission(actor, 'safeguarding') && actor.accountStatus !== 'disabled' && followup.reportedPersonId !== actor.id
+  hasPermission(actor, 'safeguarding') && actor.accountStatus !== 'disabled' && followup.ownerId === actor.id && followup.reportedPersonId !== actor.id
+
+export function hasTeacherScope(state: AppState, teacherId: string, childId: string, scope: TeacherScope): boolean {
+  const child = state.people.find(person => person.id === childId && person.role === 'child')
+  const teacher = state.people.find(person => person.id === teacherId && person.role === 'teacher')
+  if (!child || !teacher || teacher.accountStatus === 'disabled') return false
+  if (!state.teacherAssignments?.length) return child.teacherId === teacherId || state.pairs.some(pair => pair.childId === childId && pair.teacherId === teacherId)
+  const clock = Date.parse(state.clock)
+  return state.teacherAssignments.some(assignment => {
+    const childIsAssigned = assignment.childId === childId || (!assignment.childId && (scope === 'protect' || scope === 'status' && assignment.scope.includes('school-coordinate')))
+    const schoolActive = !state.schools?.length || state.schools.some(school => school.id === assignment.schoolId && school.status === 'active')
+    return schoolActive && assignment.teacherId === teacherId && childIsAssigned && assignment.scope.includes(scope) && !assignment.revokedAt && Date.parse(assignment.startsAt) <= clock && (!assignment.endsAt || clock < Date.parse(assignment.endsAt)) && (!child.schoolId || assignment.schoolId === child.schoolId) && (!teacher.schoolId || assignment.schoolId === teacher.schoolId)
+  })
+}
+
+function canCoordinateSchool(state: AppState, teacherId: string, schoolId: string): boolean {
+  const teacher = state.people.find(person => person.id === teacherId && person.role === 'teacher')
+  if (!teacher || teacher.accountStatus === 'disabled' || teacher.schoolId !== schoolId) return false
+  const clock = Date.parse(state.clock)
+  return !!state.teacherAssignments?.some(assignment => assignment.teacherId === teacherId && assignment.schoolId === schoolId && assignment.scope.includes('school-coordinate') && !assignment.revokedAt && Date.parse(assignment.startsAt) <= clock && (!assignment.endsAt || clock < Date.parse(assignment.endsAt)))
+}
+
+export function deliveryRouteForLetter(state: AppState, letter: Letter): DeliveryRoute | undefined {
+  if (letter.deliveryRoute) return letter.deliveryRoute
+  const pair = state.pairs.find(p => p.id === letter.pairId)
+  if (!pair) return undefined
+  return letter.authorId === pair.childId ? 'online' : pair.channel === 'paper' ? 'school-paper' : 'online'
+}
+
+export function canHandleHelpCase(state: AppState, actor: Person, helpCase: HelpCase): boolean {
+  if (helpCase.status === 'resolved' || actor.accountStatus === 'disabled' || helpCase.excludedActorIds.includes(actor.id) || helpCase.reportedPersonId === actor.id) return false
+  if (actor.role === 'operator') return hasPermission(actor, 'safeguarding') && (helpCase.reportedParty !== 'operator' || hasPermission(actor, 'independentSafeguarding')) && [helpCase.ownerId, helpCase.backupOwnerId].includes(actor.id)
+  if (actor.role === 'teacher') return helpCase.schoolOwnerId === actor.id && hasTeacherScope(state, actor.id, state.pairs.find(p => p.id === helpCase.pairId)?.childId ?? helpCase.requesterId, 'protect')
+  return false
+}
+
+/** The requester may follow receipt/status and reread their own words, but does
+ * not receive handler identities, conflict rules or internal case notes. */
+export function requesterHelpCaseProjection(helpCase: HelpCase): HelpCase {
+  return {
+    id: helpCase.id,
+    requesterId: helpCase.requesterId,
+    pairId: helpCase.pairId,
+    reportedParty: helpCase.reportedParty,
+    reportedPersonId: helpCase.reportedPersonId,
+    excludedActorIds: [],
+    ownerId: '',
+    status: helpCase.status,
+    body: helpCase.body,
+    createdAt: helpCase.createdAt,
+    updatedAt: helpCase.updatedAt,
+    history: [],
+  }
+}
+
+function eligibleHelpOwner(person: Person, helpCase: Pick<HelpCase, 'reportedParty' | 'reportedPersonId' | 'excludedActorIds'>): boolean {
+  if (person.accountStatus === 'disabled' || person.id === helpCase.reportedPersonId || helpCase.excludedActorIds.includes(person.id)) return false
+  if (!hasPermission(person, 'safeguarding')) return false
+  return helpCase.reportedParty !== 'operator' || hasPermission(person, 'independentSafeguarding')
+}
 
 export function formatDate(iso: string): string {
   return new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', timeZone: 'Asia/Shanghai' }).format(new Date(iso))
@@ -83,8 +149,16 @@ export function recipientForLetter(state: AppState, letter: Letter): string | un
 /** Upgrade older synthetic snapshots without importing React, IndexedDB, or cloud SDKs. */
 export function normalizeState(previous: AppState): AppState {
   const state = structuredClone(previous)
+  state.schools ??= []
+  state.teacherAssignments ??= []
+  state.deliveryEvents ??= []
+  state.helpCases ??= []
+  state.manuscriptAssets ??= []
+  state.ocrRuns ??= []
   for (const letter of state.letters) {
     letter.recipientId ??= recipientForLetter(state, letter)
+    letter.deliveryRoute ??= deliveryRouteForLetter(state, letter)
+    if (letter.moderation === 'pending') letter.reviewAssigneeId ??= state.people.find(person => hasPermission(person, 'review') && person.accountStatus !== 'disabled' && person.id !== letter.authorId)?.id
     letter.revision ??= 0
     letter.submissionVersions ??= []
     letter.coveredLetterIds ??= letter.replyTo ? [letter.replyTo] : []
@@ -108,17 +182,44 @@ export function normalizeState(previous: AppState): AppState {
 export function canReadLetter(state: AppState, actor: Person, letter: Letter): boolean {
   if (actor.accountStatus === 'disabled') return false
   if (letter.authorId === actor.id) return true
-  if (actor.role === 'operator') return hasPermission(actor, 'review') && letter.moderation !== 'draft'
+  if (actor.role === 'operator') return hasPermission(actor, 'review') && letter.moderation === 'pending' && letter.reviewAssigneeId === actor.id
   const pair = state.pairs.find(p => p.id === letter.pairId)
   if (!pair) return false
-  if (actor.role === 'teacher' && actor.id === pair.teacherId) {
-    return letter.createdBy === actor.id || (pair.channel === 'paper' && letter.moderation === 'approved')
+  if (actor.role === 'teacher') {
+    if (letter.createdBy === actor.id && letter.moderation === 'draft') return hasTeacherScope(state, actor.id, pair.childId, 'capture')
+    const delivery = state.deliveries.find(item => item.letterId === letter.id)
+    return letter.moderation === 'approved' && letter.authorId === pair.volunteerId && letter.recipientId === pair.childId && deliveryRouteForLetter(state, letter) === 'school-paper' && !delivery?.deliveredAt && hasTeacherScope(state, actor.id, pair.childId, 'paper-delivery')
   }
   return recipientForLetter(state, letter) === actor.id && letter.moderation === 'approved' && !!state.deliveries.find(d => d.letterId === letter.id)?.deliveredAt
 }
 
 export function visibleLetters(state: AppState, actor: Person): Letter[] {
   return state.letters.filter(l => canReadLetter(state, actor, l)).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+}
+
+/** A delivered recipient or print-task view contains only the frozen, approved
+ * current version. Review routing, earlier submissions and internal notes must
+ * never cross the correspondence boundary. */
+export function approvedLetterProjection(letter: Letter): Letter {
+  return {
+    id: letter.id,
+    pairId: letter.pairId,
+    authorId: letter.authorId,
+    recipientId: letter.recipientId,
+    createdBy: letter.createdBy,
+    deliveryRoute: letter.deliveryRoute,
+    title: letter.title,
+    body: letter.body,
+    riddleId: letter.riddleId,
+    replyTo: letter.replyTo,
+    attachmentId: letter.approvedRenditionId ?? letter.attachmentId,
+    ocrRunId: letter.ocrRunId,
+    approvedRenditionId: letter.approvedRenditionId,
+    moderation: 'approved',
+    createdAt: letter.createdAt,
+    updatedAt: letter.updatedAt,
+    revision: letter.revision,
+  }
 }
 
 /** Server-side projection: never ship all records and rely on UI hiding. */
@@ -128,22 +229,41 @@ export function scopeState(previous: AppState, actorId: string): AppState {
   ensure(actor && actor.accountStatus !== 'disabled', '账号不可用，请重新登录或联系负责老师。')
   const operator = actor.role === 'operator'
   const administered = hasPermission(actor, 'administration')
-  const reviewPairs = new Set(hasPermission(actor, 'review') ? state.letters.filter(l => l.moderation !== 'draft').map(l => l.pairId) : [])
+  const reviewPairs = new Set(hasPermission(actor, 'review') ? state.letters.filter(l => l.moderation === 'pending' && l.reviewAssigneeId === actorId).map(l => l.pairId) : [])
   const helpPairs = new Set(state.followups.filter(f => f.kind === 'help' && canHandleHelp(actor, f)).map(f => f.pairId))
-  state.pairs = state.pairs.filter(p => administered || reviewPairs.has(p.id) || helpPairs.has(p.id) || (!operator && (p.childId === actorId || p.volunteerId === actorId || p.teacherId === actorId)))
-  const relatedIds = new Set([actorId, ...state.pairs.flatMap(p => [p.childId, p.volunteerId, p.teacherId])])
-  state.people = state.people.filter(p => administered || relatedIds.has(p.id) || (actor.role === 'teacher' && p.teacherId === actorId) || state.followups.some(f => f.kind === 'help' && f.requesterId === p.id && canHandleHelp(actor, f)))
+  const visibleHelpCases = state.helpCases?.filter(helpCase => helpCase.requesterId === actorId || canHandleHelpCase(state, actor, helpCase)) ?? []
+  for (const helpCase of visibleHelpCases) if (helpCase.pairId) helpPairs.add(helpCase.pairId)
+  state.pairs = state.pairs.filter(p => administered || reviewPairs.has(p.id) || helpPairs.has(p.id) || (!operator && (p.childId === actorId || p.volunteerId === actorId || actor.role === 'teacher' && hasTeacherScope(state, actorId, p.childId, 'status'))))
+  const casePeople = visibleHelpCases.flatMap(helpCase => helpCase.requesterId === actorId ? [] : [helpCase.requesterId, helpCase.reportedPersonId].filter((id): id is string => !!id))
+  const relatedIds = new Set([actorId, ...state.pairs.flatMap(p => [p.childId, p.volunteerId, p.teacherId]), ...casePeople])
+  state.people = state.people.filter(p => administered || relatedIds.has(p.id) || (actor.role === 'teacher' && p.role === 'child' && hasTeacherScope(state, actorId, p.id, 'status')) || state.followups.some(f => f.kind === 'help' && f.requesterId === p.id && canHandleHelp(actor, f)))
   state.letters = visibleLetters(state, actor).map(letter => {
-    if (letter.authorId === actorId || letter.createdBy === actorId || hasPermission(actor, 'review')) return letter
-    return { ...letter, submissionVersions: [], moderationNote: undefined, coveredLetterIds: [] }
+    if (letter.authorId === actorId || letter.createdBy === actorId && letter.moderation === 'draft' || actor.role === 'operator' && letter.reviewAssigneeId === actorId && letter.moderation === 'pending') return letter
+    return approvedLetterProjection(letter)
   })
   const letterIds = new Set(state.letters.map(l => l.id))
   const pairIds = new Set(state.pairs.map(p => p.id))
   state.deliveries = state.deliveries.filter(d => letterIds.has(d.letterId))
-  state.tasks = state.tasks.filter(t => pairIds.has(t.pairId) && (administered || t.recipientId === actorId || (actor.role === 'teacher' && state.pairs.some(p => p.id === t.pairId && p.channel === 'paper' && t.recipientId === p.childId))))
+  state.tasks = state.tasks.filter(t => pairIds.has(t.pairId) && (administered || t.recipientId === actorId || actor.role === 'teacher' && state.pairs.some(p => p.id === t.pairId && t.recipientId === p.childId && hasTeacherScope(state, actorId, p.childId, 'status'))))
   state.reviews = state.reviews.filter(r => state.letters.some(l => l.id === r.letterId && (l.authorId === actorId || l.createdBy === actorId || hasPermission(actor, 'review'))))
   state.followups = state.followups.filter(f => f.kind === 'help' ? f.requesterId === actorId || canHandleHelp(actor, f) : operator && hasPermission(actor, 'administration'))
-  const attachmentIds = new Set(state.letters.flatMap(l => [l.attachmentId, ...(l.submissionVersions ?? []).map(v => v.attachmentId)]).filter(Boolean))
+  state.helpCases = visibleHelpCases.map(helpCase => helpCase.requesterId === actorId ? requesterHelpCaseProjection(helpCase) : helpCase)
+  state.teacherAssignments = state.teacherAssignments?.filter(assignment => administered || actor.role === 'teacher' && assignment.teacherId === actorId || actor.role === 'child' && assignment.childId === actorId)
+  const visibleSchoolIds = new Set(state.people.map(person => person.schoolId).filter(Boolean))
+  state.schools = state.schools?.filter(school => administered || visibleSchoolIds.has(school.id))
+  // Original manuscripts and their hashes never travel in an ordinary workspace
+  // snapshot. A delivered letter may expose only its approved rendition and the
+  // faithful, line-located transcript needed by that specific reader.
+  state.manuscriptAssets = []
+  const ocrRunIds = new Set(state.letters.map(letter => letter.ocrRunId).filter((id): id is string => !!id))
+  state.ocrRuns = (state.ocrRuns ?? []).filter(run => ocrRunIds.has(run.id) && run.status === 'completed').map(run => ({ ...run, manuscriptAssetId: '', sourceSha256: '', error: undefined }))
+  const attachmentIds = new Set<string>()
+  for (const letter of state.letters) {
+    const ownsDraftOrVersion = letter.authorId === actorId || letter.createdBy === actorId || actor.role === 'operator' && letter.reviewAssigneeId === actorId && letter.moderation === 'pending'
+    if (letter.approvedRenditionId) attachmentIds.add(letter.approvedRenditionId)
+    if (letter.attachmentId && (!letter.manuscriptAssetId && !letter.ocrRunId || ownsDraftOrVersion)) attachmentIds.add(letter.attachmentId)
+    if (ownsDraftOrVersion) for (const version of letter.submissionVersions ?? []) if (version.attachmentId) attachmentIds.add(version.attachmentId)
+  }
   state.attachments = state.attachments.filter(a => attachmentIds.has(a.id))
   return state
 }
@@ -166,7 +286,8 @@ function refreshDeadlines(state: AppState): void {
 }
 
 export function isOverdue(state: AppState, task: ReplyTask): boolean {
-  return task.status === 'awaiting' && state.pairs.find(p => p.id === task.pairId)?.status === 'active' && Date.parse(state.clock) > Date.parse(task.dueAt)
+  const pair = state.pairs.find(p => p.id === task.pairId)
+  return task.status === 'awaiting' && pair?.status === 'active' && task.recipientId !== pair.childId && Date.parse(state.clock) > Date.parse(task.dueAt)
 }
 
 export function groupedResponseTasks(state: AppState, actorId: string) {
@@ -186,13 +307,20 @@ export function groupedResponseTasks(state: AppState, actorId: string) {
   return [...groups.values()].sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt))
 }
 
-function deliver(state: AppState, letter: Letter): void {
+function recordDeliveryEvent(state: AppState, letterId: string, type: NonNullable<AppState['deliveryEvents']>[number]['type'], actorId: string, note?: string): void {
+  state.deliveryEvents ??= []
+  if (state.deliveryEvents.some(event => event.letterId === letterId && event.type === type && type !== 'print-attempt' && type !== 'delivery-failed')) return
+  state.deliveryEvents.push({ id: uid('delivery-event'), letterId, type, actorId, at: state.clock, note })
+}
+
+function deliver(state: AppState, letter: Letter, actorId: string): void {
   const pair = state.pairs.find(p => p.id === letter.pairId)!
   if (pair.status !== 'active') return
   let delivery = state.deliveries.find(d => d.letterId === letter.id)
   if (!delivery) { delivery = { letterId: letter.id }; state.deliveries.push(delivery) }
   if (delivery.deliveredAt) return
   delivery.deliveredAt = state.clock
+  recordDeliveryEvent(state, letter.id, deliveryRouteForLetter(state, letter) === 'school-paper' ? 'handed-to-child' : 'online-available', actorId)
   const recipientId = recipientForLetter(state, letter)!
   if (!state.tasks.some(t => t.letterId === letter.id)) {
     const dueAt = addDays(state.clock, recipientId === pair.childId ? 14 : 7)
@@ -216,7 +344,8 @@ function reconcileFollowups(state: AppState): void {
   }
   for (const followup of state.followups.filter(f => f.kind === 'overdue' && f.status === 'open')) {
     const target = state.tasks.find(t => t.id === followup.taskId)
-    if (target && (target.status === 'completed' || !state.tasks.some(t => t.pairId === target.pairId && t.recipientId === target.recipientId && t.status !== 'completed'))) { followup.status = 'resolved'; followup.resolution = '待回应的信件已完成。'; followup.updatedAt = state.clock }
+    const pair = target && state.pairs.find(p => p.id === target.pairId)
+    if (target && (target.recipientId === pair?.childId || target.status === 'completed' || !state.tasks.some(t => t.pairId === target.pairId && t.recipientId === target.recipientId && t.status !== 'completed'))) { followup.status = 'resolved'; followup.resolution = target.recipientId === pair?.childId ? '孩子没有回信时限，改为关怀性询问。' : '待回应的信件已完成。'; followup.updatedAt = state.clock }
   }
 }
 
@@ -241,11 +370,41 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
   const operator = (permission: NonNullable<Person['permissions']>[number] = 'administration') => ensure(hasPermission(actor, permission), '这项操作需要获得相应权限的运营人员处理。', 'FORBIDDEN')
   const editable = (letter: Letter) => {
     const pair = state.pairs.find(p => p.id === letter.pairId)
-    ensure(actor.id === letter.authorId || (actor.role === 'teacher' && pair?.teacherId === actor.id && letter.createdBy === actor.id), '你只能修改自己写的信或自己代录的回信。', 'FORBIDDEN')
+    ensure(actor.id === letter.authorId || (actor.role === 'teacher' && !!pair && hasTeacherScope(state, actor.id, pair.childId, 'capture') && letter.createdBy === actor.id), '你只能修改自己写的信或自己代录的回信。', 'FORBIDDEN')
     ensure(!pair || pair.status !== 'ended', '这组陪伴已经结束。')
     ensure(letter.moderation === 'draft' || letter.moderation === 'returned', '这封信已提交，请等待审核结果。')
   }
   switch (command.type) {
+    case 'assign-teacher': {
+      const coordinator = actor.role === 'teacher' && canCoordinateSchool(state, actor.id, command.schoolId)
+      ensure(hasPermission(actor, 'administration') || coordinator, '只有平台授权岗或本校协调老师可以指派老师。', 'FORBIDDEN')
+      const school = state.schools?.find(item => item.id === command.schoolId)
+      const teacher = state.people.find(person => person.id === command.teacherId && person.role === 'teacher')
+      const child = command.childId ? state.people.find(person => person.id === command.childId && person.role === 'child') : undefined
+      ensure(school?.status === 'active' && teacher?.schoolId === school.id && (!command.childId || child?.schoolId === school.id), '老师、孩子和学校必须属于同一有效学校。')
+      ensure(command.scope.length > 0 && command.scope.every(scope => ['status', 'capture', 'paper-delivery', 'protect', 'school-coordinate'].includes(scope)), '请选择有效的授权范围。')
+      if (coordinator) {
+        ensure(teacher.id !== actor.id, '校内协调老师不能给自己扩权。', 'FORBIDDEN')
+        ensure(!command.scope.includes('school-coordinate'), '校内协调权限只能由平台授权岗授予。', 'FORBIDDEN')
+      }
+      ensure(command.childId || command.scope.every(scope => scope === 'protect' || scope === 'school-coordinate' || scope === 'status'), '拍摄和纸质交付授权必须指向具体孩子。')
+      ensure(Number.isFinite(Date.parse(command.startsAt)) && (!command.endsAt || Date.parse(command.endsAt) > Date.parse(command.startsAt)), '请填写有效的授权起止时间。')
+      const duplicate = state.teacherAssignments!.some(assignment => assignment.schoolId === school.id && assignment.teacherId === teacher.id && assignment.childId === command.childId && !assignment.revokedAt && (!assignment.endsAt || Date.parse(assignment.endsAt) > Date.parse(command.startsAt)))
+      ensure(!duplicate, '这位老师已有重叠的有效指派，请先撤销或调整原指派。')
+      state.teacherAssignments!.push({ id: uid('teacher-assignment'), schoolId: school.id, teacherId: teacher.id, childId: child?.id, scope: [...new Set(command.scope)], startsAt: new Date(command.startsAt).toISOString(), endsAt: command.endsAt ? new Date(command.endsAt).toISOString() : undefined, approvedBy: actor.id })
+      break
+    }
+    case 'revoke-teacher-assignment': {
+      const assignment = state.teacherAssignments!.find(item => item.id === command.id)
+      ensure(assignment, '这条老师指派不存在。')
+      const coordinator = actor.role === 'teacher' && canCoordinateSchool(state, actor.id, assignment.schoolId)
+      ensure(hasPermission(actor, 'administration') || coordinator, '只有平台授权岗或本校协调老师可以撤销指派。', 'FORBIDDEN')
+      if (coordinator) {
+        ensure(assignment.teacherId !== actor.id && !assignment.scope.includes('school-coordinate'), '校内协调老师不能撤销自己的权限或其他协调授权。', 'FORBIDDEN')
+      }
+      assignment.revokedAt ??= state.clock
+      break
+    }
     case 'match': {
       operator()
       const existing = state.pairs.find(p => p.status !== 'ended' && p.childId === command.childId && p.volunteerId === command.volunteerId)
@@ -253,40 +412,40 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       const child = state.people.find(p => p.id === command.childId && p.role === 'child')
       const volunteer = state.people.find(p => p.id === command.volunteerId && p.role === 'volunteer')
       ensure(child && volunteer && state.people.some(p => p.id === command.teacherId && p.role === 'teacher'), '请选择有效的小朋友、志愿者和老师。')
-      if (options.formal) { ensure(child.guardianConsent && child.accountStatus === 'active', '请先完成有效的监护授权。'); ensure(volunteer.volunteerApproved && volunteer.accountStatus === 'active', '志愿者尚未通过审核。'); ensure(child.teacherId === command.teacherId, '只能选择负责这位小朋友的老师。') }
-      ensure(!state.pairs.some(p => p.status !== 'ended' && (p.childId === child.id || p.volunteerId === volunteer.id)), '这位伙伴已有结对，请选择尚未结对的伙伴。')
+      if (options.formal) { ensure(child.guardianConsent && child.accountStatus === 'active', '请先完成有效的监护授权。'); ensure(volunteer.volunteerApproved && volunteer.accountStatus === 'active', '志愿者尚未通过审核。'); ensure(hasTeacherScope(state, command.teacherId, child.id, 'status'), '只能选择已获学校授权负责这位小朋友的老师。') }
       const id = uid('pair'), dueAt = addDays(state.clock, 7)
-      state.pairs.push({ id, childId: child.id, volunteerId: volunteer.id, teacherId: command.teacherId, channel: command.channel, status: 'active', startedAt: state.clock, pauseHistory: [] })
+      state.pairs.push({ id, childId: child.id, volunteerId: volunteer.id, teacherId: command.teacherId, schoolId: child.schoolId, channel: command.channel, status: 'active', startedAt: state.clock, pauseHistory: [] })
       state.tasks.push({ id: `first-${id}`, pairId: id, letterId: '', recipientId: volunteer.id, dueAt, baseDueAt: dueAt, createdAt: state.clock, status: 'awaiting', kind: 'first-letter', exclusions: [] })
       break
     }
     case 'save-letter': {
-      const pair = command.pairId ? pairById(command.pairId) : undefined
-      ensure(!pair || pair.status !== 'ended', '这组陪伴已经结束。')
+      ensure(command.pairId, '请先选择明确的书信伙伴。')
+      const pair = pairById(command.pairId)
+      ensure(pair.status !== 'ended', '这组陪伴已经结束。')
       ensure(command.title.trim().length <= 60, '标题请控制在 60 字以内。')
       ensure(command.id === undefined || (command.id.trim().length > 0 && command.id.length <= 120), '这封信的标识无效。')
       ensure(command.body.length <= 6000, '信件正文请控制在 6000 字以内。')
       ensure(!command.riddleId || riddles.some(r => r.id === command.riddleId), '这道谜语不存在，请重新选择。')
-      ensure(actor.role === 'child' || actor.role === 'volunteer' || (actor.role === 'teacher' && pair?.teacherId === actor.id), '你没有写这封信的权限。', 'FORBIDDEN')
-      const authorId = actor.role === 'teacher' ? pair!.childId : actor.id
+      ensure(actor.role === 'child' || actor.role === 'volunteer' || (actor.role === 'teacher' && hasTeacherScope(state, actor.id, pair.childId, 'capture')), '你没有写这封信的权限。', 'FORBIDDEN')
+      const authorId = actor.role === 'teacher' ? pair.childId : actor.id
       ensure(!command.authorId || command.authorId === authorId, '不能替换写信人。', 'FORBIDDEN')
-      ensure(!pair || authorId === pair.childId || authorId === pair.volunteerId, '请选择自己的书信伙伴。', 'FORBIDDEN')
-      ensure(pair || !state.pairs.some(p => p.status !== 'ended' && (p.childId === actor.id || p.volunteerId === actor.id)), '请将草稿写给当前的书信伙伴。')
-      const recipientId = pair ? authorId === pair.childId ? pair.volunteerId : pair.childId : undefined
+      ensure(authorId === pair.childId || authorId === pair.volunteerId, '请选择自己的书信伙伴。', 'FORBIDDEN')
+      const recipientId = authorId === pair.childId ? pair.volunteerId : pair.childId
       ensure(!command.recipientId || command.recipientId === recipientId, '不能向未结对的人寄信。', 'FORBIDDEN')
-      if (command.replyTo) { const original = letterById(command.replyTo); ensure(original.pairId === pair?.id && recipientForLetter(state, original) === authorId && original.moderation === 'approved' && state.deliveries.some(d => d.letterId === original.id && d.deliveredAt), '原信确认送达后，才可以写回信。') }
+      const route: DeliveryRoute = command.deliveryRoute ?? (authorId === pair.childId ? 'online' : pair.channel === 'paper' ? 'school-paper' : 'online')
+      ensure(route === 'online' || route === 'school-paper', '请选择有效的逐封投递方式。')
+      ensure(authorId !== pair.childId || route === 'online', '孩子写给远端志愿者的信只能在线送达。')
+      if (command.replyTo) { const original = letterById(command.replyTo); ensure(original.pairId === pair.id && recipientForLetter(state, original) === authorId && original.moderation === 'approved' && state.deliveries.some(d => d.letterId === original.id && d.deliveredAt), '原信确认送达后，才可以写回信。') }
       let letter = command.id ? state.letters.find(l => l.id === command.id) : state.letters.find(l => l.pairId === command.pairId && l.authorId === authorId && l.createdBy === actor.id && l.replyTo === command.replyTo && (l.moderation === 'draft' || l.moderation === 'returned') && l.title === command.title.trim() && l.body === command.body && l.riddleId === command.riddleId)
       if (letter) {
         editable(letter)
-        const introductionBinding = !letter.pairId && !!pair && !letter.replyTo && letter.authorId === actor.id
-        ensure((letter.pairId === command.pairId || introductionBinding) && letter.authorId === authorId && letter.replyTo === command.replyTo, '修改时不能更换信件的伙伴或原信。')
-        const unchanged = !command.file && !command.removeAttachment && (!command.attachmentId || command.attachmentId === letter.attachmentId) && letter.pairId === command.pairId && letter.title === command.title.trim() && letter.body === command.body && letter.riddleId === command.riddleId
+        ensure(letter.pairId === command.pairId && letter.authorId === authorId && letter.recipientId === recipientId && letter.replyTo === command.replyTo && letter.deliveryRoute === route, '修改时不能更换信件的伙伴、收件人、投递方式或原信。')
+        const unchanged = !command.file && !command.removeAttachment && (!command.attachmentId || command.attachmentId === letter.attachmentId) && letter.title === command.title.trim() && letter.body === command.body && letter.riddleId === command.riddleId
         if (unchanged) break
         ensure(command.expectedRevision === undefined || command.expectedRevision === letter.revision, '这封草稿已在另一台设备更新。请保留当前文字，重新载入后合并。')
-        if (introductionBinding) { letter.pairId = pair.id; letter.recipientId = recipientId }
       } else {
         ensure(command.expectedRevision === undefined || command.expectedRevision === 0, '这封草稿的版本已变化，请重新载入。')
-        letter = { id: command.id ?? uid('letter'), pairId: command.pairId, authorId, recipientId, createdBy: actor.id, title: '', body: '', replyTo: command.replyTo, moderation: 'draft', createdAt: state.clock, updatedAt: state.clock, revision: 0, coveredLetterIds: [], submissionVersions: [] }
+        letter = { id: command.id ?? uid('letter'), pairId: pair.id, authorId, recipientId, createdBy: actor.id, deliveryRoute: route, title: '', body: '', replyTo: command.replyTo, moderation: 'draft', createdAt: state.clock, updatedAt: state.clock, revision: 0, coveredLetterIds: [], submissionVersions: [] }
         state.letters.push(letter)
       }
       letter.title = command.title.trim(); letter.body = command.body; letter.riddleId = command.riddleId; letter.updatedAt = state.clock; letter.revision = (letter.revision ?? 0) + 1
@@ -318,7 +477,8 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       const coverage = [...new Set(command.coveredLetterIds ?? (letter.replyTo ? [letter.replyTo] : []))]
       for (const id of coverage) ensure(state.tasks.some(t => t.letterId === id && t.pairId === letter.pairId && t.recipientId === letter.authorId && t.status === 'awaiting'), '所选来信已被回应或正在审核，请重新选择。')
       letter.coveredLetterIds = coverage
-      letter.submissionVersions!.push({ revision: letter.revision!, title: letter.title, body: letter.body, riddleId: letter.riddleId, attachmentId: letter.attachmentId, coveredLetterIds: [...coverage], submittedAt: state.clock, submittedBy: actor.id })
+      letter.submissionVersions!.push({ revision: letter.revision!, title: letter.title, body: letter.body, riddleId: letter.riddleId, attachmentId: letter.attachmentId, manuscriptAssetId: letter.manuscriptAssetId, ocrRunId: letter.ocrRunId, approvedRenditionId: letter.approvedRenditionId, coveredLetterIds: [...coverage], submittedAt: state.clock, submittedBy: actor.id })
+      letter.reviewAssigneeId = state.people.find(person => hasPermission(person, 'review') && person.accountStatus !== 'disabled' && person.id !== letter.authorId)?.id
       letter.moderation = 'pending'; letter.updatedAt = state.clock
       for (const task of state.tasks.filter(t => t.pairId === letter.pairId && t.recipientId === letter.authorId && (coverage.includes(t.letterId) || t.kind === 'first-letter') && t.status === 'awaiting')) { task.status = 'review'; task.reviewLetterId = letter.id; task.exclusions!.push({ start: state.clock, kind: 'review', sourceId: letter.id }) }
       break
@@ -326,11 +486,45 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
     case 'review-letter': {
       operator('review')
       const letter = letterById(command.id)
+      ensure(letter.reviewAssigneeId === actor.id, '只有被分派的审核员可以处理这封信。', 'FORBIDDEN')
       if (letter.moderation === command.decision) break
       ensure(letter.moderation === 'pending', '只有待审核的信件可以审核。')
       const pair = pairById(letter.pairId)
       ensure(pair.status !== 'ended' || command.decision === 'returned', '陪伴已结束，不能继续送出信件。')
       ensure(command.decision === 'approved' || command.note.trim().length >= 3, '请写下具体的修改建议。')
+      const teacherCapturedManuscript = letter.authorId === pair.childId && letter.createdBy !== letter.authorId && !!letter.attachmentId
+      if (command.decision === 'approved' && teacherCapturedManuscript) {
+        ensure(command.transcriptFaithfulConfirmed && command.imagePrivacyConfirmed, '儿童出站图像须逐行核对忠实转写，并确认获准图像副本不泄露私人信息。')
+        if (options.formal) {
+          const original = state.manuscriptAssets?.find(asset => asset.id === letter.manuscriptAssetId && asset.letterId === letter.id && asset.kind === 'original')
+          const ocr = state.ocrRuns?.find(run => run.id === letter.ocrRunId && run.letterId === letter.id && run.status === 'completed' && run.humanReviewRequired)
+          const rendition = state.attachments.find(attachment => attachment.id === letter.approvedRenditionId && attachment.pairId === letter.pairId)
+          const approvedAsset = state.manuscriptAssets?.find(asset => asset.letterId === letter.id && asset.kind === 'approved-redacted' && !!asset.storagePath && asset.storagePath === rendition?.storagePath)
+          const isolatedStorage = !!original?.storagePath && !!approvedAsset?.storagePath && original.storagePath !== approvedAsset.storagePath
+          const sourceIntegrity = !!original?.sha256 && ocr?.manuscriptAssetId === original.id && ocr.sourceSha256 === original.sha256
+          ensure(original && ocr && rendition && approvedAsset && rendition.id !== letter.attachmentId && isolatedStorage && sourceIntegrity, '正式试测尚未完成相互隔离且可校验的受控原稿、转写和获准图像副本，不能放行。')
+        } else if (!letter.approvedRenditionId) {
+          const source = state.attachments.find(item => item.id === letter.attachmentId)
+          ensure(source, '私有原稿图片不存在，不能放行。')
+          const originalAssetId = uid('manuscript-original')
+          const approvedAssetId = uid('manuscript-approved')
+          const approvedAttachmentId = uid('attachment-approved')
+          const ocrRunId = uid('ocr-manual')
+          state.manuscriptAssets!.push({ id: originalAssetId, letterId: letter.id, kind: 'original', storagePath: source.storagePath, sha256: source.sha256, mimeType: source.type, width: source.width, height: source.height, createdAt: source.uploadedAt ?? state.clock })
+          state.attachments.push({ ...source, id: approvedAttachmentId, name: `${source.name.replace(/\.(png|jpe?g)$/i, '')}·获准图像副本${/\.png$/i.test(source.name) ? '.png' : '.jpg'}`, ownerId: actor.id, uploadedAt: state.clock })
+          state.manuscriptAssets!.push({ id: approvedAssetId, letterId: letter.id, kind: 'approved-redacted', storagePath: source.storagePath, sha256: source.sha256, mimeType: source.type, width: source.width, height: source.height, createdAt: state.clock })
+          const lines = letter.body.split(/\r?\n/).filter(line => line.length > 0).map((line, index, all) => {
+            const top = 0.08 + index * Math.min(0.12, 0.78 / Math.max(all.length, 1))
+            return { id: `${ocrRunId}-line-${index + 1}`, pageIndex: 0, text: line, correctedText: line, polygon: [0.08, top, 0.92, top, 0.92, Math.min(top + 0.07, 0.94), 0.08, Math.min(top + 0.07, 0.94)], uncertain: false }
+          })
+          state.ocrRuns!.push({ id: ocrRunId, letterId: letter.id, manuscriptAssetId: originalAssetId, sourceSha256: source.sha256 ?? `local-synthetic-${source.id}`, status: 'completed', humanReviewRequired: true, engine: 'manual-faithful-transcription', engineVersion: 'demo-1', startedAt: state.clock, completedAt: state.clock, lines })
+          letter.manuscriptAssetId = originalAssetId
+          letter.ocrRunId = ocrRunId
+          letter.approvedRenditionId = approvedAttachmentId
+          const submitted = letter.submissionVersions?.find(version => version.revision === letter.revision)
+          if (submitted) { submitted.manuscriptAssetId = originalAssetId; submitted.ocrRunId = ocrRunId; submitted.approvedRenditionId = approvedAttachmentId }
+        }
+      }
       letter.moderation = command.decision; letter.moderationNote = command.note.trim(); letter.updatedAt = state.clock
       state.reviews.push({ id: uid('review'), letterId: letter.id, operatorId: actor.id, decision: command.decision, note: command.note.trim(), createdAt: state.clock, revision: letter.revision })
       for (const task of state.tasks.filter(t => t.reviewLetterId === letter.id && t.status === 'review')) {
@@ -340,8 +534,26 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       }
       if (command.decision === 'approved') {
         if (!state.deliveries.some(d => d.letterId === letter.id)) state.deliveries.push({ letterId: letter.id })
-        if (pair.channel === 'online') deliver(state, letter)
+        if (deliveryRouteForLetter(state, letter) === 'online') deliver(state, letter, actor.id)
       }
+      break
+    }
+    case 'assign-review': {
+      operator('administration')
+      const letter = letterById(command.id)
+      ensure(letter.moderation === 'pending', '只有待审核信件可以分派。')
+      const reviewer = state.people.find(person => person.id === command.reviewerId)
+      ensure(reviewer && hasPermission(reviewer, 'review') && reviewer.accountStatus !== 'disabled' && reviewer.id !== letter.authorId, '请选择有效且独立的审核员。', 'FORBIDDEN')
+      letter.reviewAssigneeId = reviewer.id
+      break
+    }
+    case 'release-held-letter': {
+      operator('review')
+      const letter = letterById(command.id), pair = active(letter.pairId)
+      ensure(letter.moderation === 'approved' && deliveryRouteForLetter(state, letter) === 'online', '只有已审核且在线投递的信件可以复核放行。')
+      ensure(letter.recipientId === (letter.authorId === pair.childId ? pair.volunteerId : pair.childId), '请重新核对收件人和结对。')
+      ensure(letter.submissionVersions?.some(version => version.revision === letter.revision), '请重新核对已批准版本。')
+      deliver(state, letter, actor.id)
       break
     }
     case 'print':
@@ -349,26 +561,50 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       ensure(actor.role === 'teacher', '请使用负责收发的老师账号。', 'FORBIDDEN')
       for (const id of new Set(command.ids)) {
         const letter = letterById(id), pair = active(letter.pairId)
-        ensure(pair.teacherId === actor.id && pair.channel === 'paper', '只能处理自己负责的纸质信件。', 'FORBIDDEN')
+        ensure(hasTeacherScope(state, actor.id, pair.childId, 'paper-delivery') && letter.authorId === pair.volunteerId && letter.recipientId === pair.childId && deliveryRouteForLetter(state, letter) === 'school-paper', '只能处理负责孩子收到的纸质信件。', 'FORBIDDEN')
         ensure(letter.moderation === 'approved', '只有审核通过的纸质信件可以打印或交付。')
         let delivery = state.deliveries.find(d => d.letterId === id)
         if (!delivery) { delivery = { letterId: id }; state.deliveries.push(delivery) }
-        if (command.type === 'print') delivery.printedAt ??= state.clock
-        else { ensure(delivery.printedAt, '请先打印这封信，再确认实际交付。'); deliver(state, letter) }
+        if (command.type === 'print') { recordDeliveryEvent(state, id, 'print-attempt', actor.id); if (!delivery.printedAt) { delivery.printedAt = state.clock; recordDeliveryEvent(state, id, 'printed', actor.id) } }
+        else { ensure(delivery.printedAt, '请先打印这封信，再确认实际交付。'); deliver(state, letter, actor.id) }
       }
       break
     }
     case 'read': {
       const letter = letterById(command.id)
       ensure(canReadLetter(state, actor, letter), '这封信暂时不在你的可读范围内。', 'FORBIDDEN')
-      if (recipientForLetter(state, letter) === actor.id) { const delivery = state.deliveries.find(d => d.letterId === letter.id); ensure(letter.moderation === 'approved' && delivery?.deliveredAt, '信件尚未送达。'); delivery.readAt ??= state.clock }
+      if (recipientForLetter(state, letter) === actor.id) { const delivery = state.deliveries.find(d => d.letterId === letter.id); ensure(letter.moderation === 'approved' && delivery?.deliveredAt, '信件尚未送达。'); if (!delivery.readAt) { delivery.readAt = state.clock; recordDeliveryEvent(state, letter.id, 'online-read', actor.id) } }
+      break
+    }
+    case 'witness-read': {
+      ensure(actor.role === 'teacher', '请使用负责孩子的老师账号。', 'FORBIDDEN')
+      const letter = letterById(command.id), pair = pairById(letter.pairId)
+      ensure(letter.authorId === pair.volunteerId && letter.recipientId === pair.childId && deliveryRouteForLetter(state, letter) === 'school-paper' && hasTeacherScope(state, actor.id, pair.childId, 'paper-delivery'), '只能见证负责孩子收到的纸信。', 'FORBIDDEN')
+      const delivery = state.deliveries.find(d => d.letterId === letter.id)
+      ensure(letter.moderation === 'approved' && delivery?.deliveredAt, '纸信实际交付后才能记录见证阅读。')
+      if (!delivery.witnessedReadAt) { delivery.witnessedReadAt = state.clock; delivery.witnessedBy = actor.id; recordDeliveryEvent(state, letter.id, 'witnessed-read', actor.id) }
       break
     }
     case 'pause-pair': {
-      operator(); const pair = pairById(command.id)
+      const pair = pairById(command.id)
+      const teacherStop = actor.role === 'teacher' && hasTeacherScope(state, actor.id, pair.childId, 'paper-delivery')
+      ensure(hasPermission(actor, 'administration') || teacherStop, '只有平台结对岗或当前负责老师可以停止这组交付。', 'FORBIDDEN')
       if (pair.status === 'paused') break
       ensure(pair.status !== 'ended', '陪伴已结束。'); ensure(command.reason.trim().length >= 2, '请记录暂停原因。')
-      pair.status = 'paused'; pair.pausedAt = state.clock; pair.pauseReason = command.reason.trim(); pair.pauseHistory!.push({ start: state.clock, kind: 'pause', sourceId: pair.id })
+      pair.status = 'paused'; pair.pausedAt = state.clock; pair.pauseReason = teacherStop ? `学校停止交付：${command.reason.trim()}` : command.reason.trim(); pair.pauseHistory!.push({ start: state.clock, kind: 'pause', sourceId: teacherStop ? `teacher:${actor.id}` : pair.id })
+      break
+    }
+    case 'pause-volunteer': {
+      ensure(actor.role === 'operator' && hasPermission(actor, 'safeguarding'), '只有儿童保护授权岗可以暂停志愿者的全部结对。', 'FORBIDDEN')
+      ensure(command.reason.trim().length >= 2, '请记录保护性暂停原因。')
+      const volunteer = state.people.find(person => person.id === command.volunteerId && person.role === 'volunteer')
+      ensure(volunteer, '这位志愿者不存在。')
+      const pairs = state.pairs.filter(pair => pair.volunteerId === volunteer.id && pair.status === 'active')
+      ensure(pairs.length > 0, '这位志愿者当前没有可暂停的活跃结对。')
+      for (const pair of pairs) {
+        pair.status = 'paused'; pair.pausedAt = state.clock; pair.pauseReason = `保护性暂停：${command.reason.trim()}`
+        pair.pauseHistory!.push({ start: state.clock, kind: 'pause', sourceId: `volunteer:${volunteer.id}` })
+      }
       break
     }
     case 'resume-pair': {
@@ -377,7 +613,8 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       ensure(pair.status !== 'ended', '陪伴已结束，请重新建立结对。')
       for (const interval of pair.pauseHistory ?? []) if (!interval.end) interval.end = state.clock
       pair.status = 'active'; pair.pausedAt = undefined; pair.pauseReason = undefined
-      for (const letter of state.letters.filter(l => l.pairId === pair.id && l.moderation === 'approved' && !state.deliveries.some(d => d.letterId === l.id && d.deliveredAt))) if (pair.channel === 'online') deliver(state, letter)
+      // A previously approved letter stays held until its recipient, version and
+      // delivery route are checked again. Resuming a Pair never delivers it.
       break
     }
     case 'end-pair': {
@@ -399,7 +636,7 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       break
     }
     case 'help': {
-      ensure(actor.role !== 'operator', '运营人员请在跟进事项中记录处理情况。', 'FORBIDDEN')
+      ensure(actor.role !== 'operator', '运营人员请使用独立保护渠道提交或处理个案。', 'FORBIDDEN')
       ensure(typeof command.body === 'string' && command.body.trim().length >= 2 && command.body.length <= 2000, '请写下 2—2000 字的想法。')
       const reportedParty = command.reportedParty ?? 'other'
       ensure(['volunteer', 'teacher', 'operator', 'other'].includes(reportedParty), '请选择求助涉及的对象。')
@@ -410,10 +647,55 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
         ensure(reportedPerson && reportedParty !== 'other' && reportedPerson.role === reportedParty, '被反映人员与所选身份不一致。')
         if (reportedParty !== 'operator') ensure(state.pairs.some(p => [p.childId, p.volunteerId, p.teacherId].includes(actor.id) && [p.childId, p.volunteerId, p.teacherId].includes(reportedPerson.id)), '请选择与你有关的人员。', 'FORBIDDEN')
       }
-      ensure(reportedParty !== 'operator' || reportedPerson, '当前没有独立的站内运营投诉渠道，请联系学校或项目指定负责人。')
-      const owner = state.people.find(p => hasPermission(p, 'safeguarding') && p.accountStatus !== 'disabled' && p.id !== reportedPerson?.id)
+      const inferredReportedId = reportedPerson?.id ?? (reportedParty === 'teacher' ? pair?.teacherId : reportedParty === 'volunteer' ? pair?.volunteerId : undefined)
+      const excludedActorIds = inferredReportedId ? [inferredReportedId] : []
+      const ownerRule = { reportedParty, reportedPersonId: reportedPerson?.id, excludedActorIds }
+      const owners = state.people.filter(person => eligibleHelpOwner(person, ownerRule))
+      const owner = owners[0]
       ensure(owner, '当前没有可独立接手的保护人员，请联系学校或项目指定负责人。')
-      state.followups.push({ id: uid('help'), pairId: pair?.id, requesterId: actor.id, ownerId: owner.id, kind: 'help', status: 'open', note: `${actor.nickname}：${command.body.trim()}`, reportedParty, reportedPersonId: reportedPerson?.id, createdAt: state.clock, updatedAt: state.clock, history: [] })
+      const childId = actor.role === 'child' ? actor.id : pair?.childId
+      // When a child only knows that a teacher is involved, no teacher receives
+      // the case until the independent platform handler has clarified conflicts.
+      const unknownTeacher = reportedParty === 'teacher' && !reportedPerson
+      const schoolOwner = childId && !unknownTeacher ? state.people.find(person => person.role === 'teacher' && !excludedActorIds.includes(person.id) && hasTeacherScope(state, person.id, childId, 'protect')) : undefined
+      const helpCase: HelpCase = {
+        id: uid('help-case'), requesterId: actor.id, pairId: pair?.id, reportedParty, reportedPersonId: reportedPerson?.id,
+        excludedActorIds, ownerId: owner.id, backupOwnerId: owners[1]?.id, schoolOwnerId: schoolOwner?.id,
+        status: 'open', body: command.body.trim(), createdAt: state.clock, updatedAt: state.clock,
+        history: [{ at: state.clock, actorId: actor.id, note: '已提交求助，等待独立保护人员接手。' }],
+      }
+      state.helpCases!.push(helpCase)
+      break
+    }
+    case 'claim-help-case': {
+      const helpCase = state.helpCases!.find(item => item.id === command.id)
+      ensure(helpCase, '这个保护个案不存在。')
+      ensure(canHandleHelpCase(state, actor, helpCase), '你不能读取或接手这个保护个案。', 'FORBIDDEN')
+      if (helpCase.status === 'resolved') break
+      helpCase.ownerId = actor.id
+      helpCase.status = 'claimed'; helpCase.claimedAt ??= state.clock; helpCase.updatedAt = state.clock
+      helpCase.history.push({ at: state.clock, actorId: actor.id, note: '保护人员已接手。' })
+      break
+    }
+    case 'assign-help-case': {
+      const helpCase = state.helpCases!.find(item => item.id === command.id)
+      ensure(helpCase, '这个保护个案不存在。')
+      ensure(canHandleHelpCase(state, actor, helpCase), '你不能转派这个保护个案。', 'FORBIDDEN')
+      ensure(helpCase.status !== 'resolved', '已结束的保护个案不能转派。')
+      const owner = state.people.find(person => person.id === command.ownerId)
+      ensure(owner && eligibleHelpOwner(owner, helpCase), '请选择有受理权限且无需回避的独立保护人员。', 'FORBIDDEN')
+      helpCase.ownerId = owner.id; helpCase.status = 'open'; helpCase.claimedAt = undefined; helpCase.updatedAt = state.clock
+      helpCase.history.push({ at: state.clock, actorId: actor.id, note: `已转派给${owner.nickname}。` })
+      break
+    }
+    case 'resolve-help-case': {
+      const helpCase = state.helpCases!.find(item => item.id === command.id)
+      ensure(helpCase, '这个保护个案不存在。')
+      ensure(canHandleHelpCase(state, actor, helpCase), '你不能关闭这个保护个案。', 'FORBIDDEN')
+      ensure(command.note.trim().length >= 3 && command.note.length <= 2000, '请记录至少 3 字的处理情况。')
+      if (helpCase.status === 'resolved') break
+      helpCase.status = 'resolved'; helpCase.resolution = command.note.trim(); helpCase.updatedAt = state.clock
+      helpCase.history.push({ at: state.clock, actorId: actor.id, note: command.note.trim() })
       break
     }
     case 'resolve-followup':

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
-import { DomainError, normalizeState, reduceCommand, refreshState, scopeState, canReadLetter } from '../src/domain'
+import { approvedLetterProjection, DomainError, normalizeState, reduceCommand, refreshState, requesterHelpCaseProjection, scopeState, canReadLetter } from '../src/domain'
 import type { AppState, Command, Person, Role } from '../src/types'
 
 export class ServiceError extends Error { constructor(public code: string, message: string) { super(message) } }
@@ -14,11 +14,12 @@ export interface Application { id: string; userId: string; nickname: string; ins
 export interface Invite { id: string; tokenHash: string; role: 'child' | 'teacher' | 'operator'; nickname: string; email?: string; permissions?: string[]; teacherId?: string; createdBy: string; createdAt: string; expiresAt: string; status: 'open' | 'activating' | 'used' | 'revoked'; activationId?: string; username?: string; userId?: string; consentId?: string }
 export interface Consent { id: string; childId?: string; teacherId: string; guardianName: string; relationship: string; noticeVersion: string; evidenceReference: string; recordedBy: string; recordedAt: string; withdrawnAt?: string; reason?: string }
 export interface PrivacyRequest { id: string; userId: string; kind: 'export' | 'delete' | 'withdraw'; reason: string; status: 'open' | 'resolved'; createdAt: string; resolvedBy?: string; note?: string }
-export interface Store { revision: number; state: AppState; accounts: Record<string, Account>; applications: Application[]; invites: Invite[]; consents: Consent[]; privacyRequests: PrivacyRequest[]; receipts: Record<string, { hash: string; resultId: string; at: string }>; audit: { id: string; actorId: string; action: string; targetId?: string; at: string }[]; rates: Record<string, { minute: number; count: number }> }
+export interface AccessAuditEvent { id: string; actorId: string; targetType: 'letter' | 'attachment' | 'help-case' | 'teacher-overview'; targetId: string; decision: 'allowed' | 'denied'; purpose: string; at: string; approvalId?: string; versionId?: string }
+export interface Store { revision: number; state: AppState; accounts: Record<string, Account>; applications: Application[]; invites: Invite[]; consents: Consent[]; privacyRequests: PrivacyRequest[]; receipts: Record<string, { hash: string; resultId: string; at: string }>; audit: { id: string; actorId: string; action: string; targetId?: string; at: string }[]; accessAudit: AccessAuditEvent[]; rates: Record<string, { minute: number; count: number }> }
 export interface Identity { uid: string; email?: string; anonymous?: boolean }
-export interface Repository { read<T>(operation: (store: Store) => T | Promise<T>): Promise<T>; transact<T>(operation: (store: Store) => T | Promise<T>): Promise<T> }
+export interface Repository { read<T>(operation: (store: Store) => T | Promise<T>): Promise<T>; transact<T>(operation: (store: Store) => T | Promise<T>): Promise<T>; appendAccessAudit?(event: AccessAuditEvent): Promise<void> }
 export function emptyStore(now = new Date().toISOString()): Store {
-  return { revision: 0, state: { id: 'main', version: 1, clock: now, people: [], pairs: [], letters: [], deliveries: [], tasks: [], reviews: [], followups: [], attachments: [] }, accounts: {}, applications: [], invites: [], consents: [], privacyRequests: [], receipts: {}, audit: [], rates: {} }
+  return { revision: 0, state: { id: 'main', version: 1, clock: now, people: [], pairs: [], letters: [], deliveries: [], tasks: [], reviews: [], followups: [], attachments: [], schools: [], teacherAssignments: [], helpCases: [], deliveryEvents: [] }, accounts: {}, applications: [], invites: [], consents: [], privacyRequests: [], receipts: {}, audit: [], accessAudit: [], rates: {} }
 }
 export function getAccount(store: Store, identity: Identity, active = false): Account {
   requireValue(identity.uid && !identity.anonymous, '请先登录', 'UNAUTHENTICATED')
@@ -37,9 +38,45 @@ export function syncPermissions(store: Store) {
     if (person.role === 'operator') person.permissions = account?.status === 'active' ? [
       ...(account.permissions.includes('moderate') ? ['review' as const] : []),
       ...(account.permissions.includes('help') ? ['safeguarding' as const] : []),
+      ...(account.permissions.includes('help-independent') ? ['independentSafeguarding' as const] : []),
       ...(account.permissions.includes('followup') ? ['administration' as const] : []),
     ] : []
   }
+}
+export function teacherHasScope(store: Store, teacherId: string, childId: string, scope: NonNullable<AppState['teacherAssignments']>[number]['scope'][number], now = store.state.clock, schoolId?: string): boolean {
+  if (store.accounts[teacherId]?.status !== 'active') return false
+  const teacher = store.state.people.find(person => person.id === teacherId && person.role === 'teacher')
+  const child = store.state.people.find(person => person.id === childId && person.role === 'child')
+  if (!teacher || !child) return false
+  if (schoolId && (teacher.schoolId && teacher.schoolId !== schoolId || child.schoolId && child.schoolId !== schoolId)) return false
+  const assignments = store.state.teacherAssignments ?? []
+  const schools = store.state.schools ?? []
+  return assignments.some(item => item.teacherId === teacherId && item.childId === childId && item.scope.includes(scope) && !item.revokedAt && Date.parse(item.startsAt) <= Date.parse(now) && (!item.endsAt || Date.parse(now) < Date.parse(item.endsAt)) && (!schoolId || item.schoolId === schoolId) && schools.some(school => school.id === item.schoolId && school.status === 'active'))
+}
+
+export function teacherCoordinatesSchool(store: Store, teacherId: string, schoolId: string, now = store.state.clock): boolean {
+  if (store.accounts[teacherId]?.status !== 'active') return false
+  const teacher = store.state.people.find(person => person.id === teacherId && person.role === 'teacher')
+  if (!teacher || teacher.schoolId !== schoolId || !store.state.schools?.some(school => school.id === schoolId && school.status === 'active')) return false
+  return !!store.state.teacherAssignments?.some(item => item.teacherId === teacherId && item.schoolId === schoolId && item.scope.includes('school-coordinate') && !item.revokedAt && Date.parse(item.startsAt) <= Date.parse(now) && (!item.endsAt || Date.parse(now) < Date.parse(item.endsAt)))
+}
+
+async function appendAccessAudit(repository: Repository, event: AccessAuditEvent): Promise<void> {
+  if (repository.appendAccessAudit) return repository.appendAccessAudit(event)
+  await repository.transact(store => { store.accessAudit.push(event) })
+}
+
+async function auditedRead<T>(repository: Repository, identity: Identity, targetType: AccessAuditEvent['targetType'], targetId: string, purpose: string, authorize: (store: Store) => T, now = new Date().toISOString(), auditDetails?: (store: Store, value: T) => Pick<AccessAuditEvent, 'approvalId' | 'versionId'>): Promise<T> {
+  const outcome = await repository.read(store => {
+    try {
+      const value = authorize(store)
+      return { allowed: true as const, value, details: auditDetails?.(store, value) }
+    }
+    catch (error) { return { allowed: false as const, error } }
+  })
+  await appendAccessAudit(repository, { id: randomUUID(), actorId: identity.uid || 'anonymous', targetType, targetId, decision: outcome.allowed ? 'allowed' : 'denied', purpose, at: now, ...(outcome.allowed ? outcome.details : undefined) })
+  if (!outcome.allowed) throw outcome.error
+  return outcome.value
 }
 export function snapshot(store: Store, identity: Identity) {
   const account = getAccount(store, identity)
@@ -50,9 +87,52 @@ export function snapshot(store: Store, identity: Identity) {
     return { state: { ...emptyStore(store.state.clock).state, people: [profile] }, profile, revision: store.revision, account: { ...account, application: store.applications.find(item => item.userId === identity.uid) } }
   }
   const state = scopeState(normalizeState(store.state), identity.uid)
-  state.attachments = state.attachments.map(({ blob: _blob, storagePath: _storagePath, ...safe }) => safe)
+  if (account.role === 'teacher') {
+    const full = normalizeState(store.state)
+    const allowedPairs = new Set(full.pairs.filter(pair => teacherHasScope(store, identity.uid, pair.childId, 'status', store.state.clock, pair.schoolId)).map(pair => pair.id))
+    state.pairs = full.pairs.filter(pair => allowedPairs.has(pair.id))
+    state.letters = full.letters.filter(letter => allowedPairs.has(letter.pairId))
+    state.tasks = full.tasks.filter(task => allowedPairs.has(task.pairId))
+    const visibleLetterIds = new Set(state.letters.map(letter => letter.id))
+    state.deliveries = full.deliveries.filter(delivery => visibleLetterIds.has(delivery.letterId))
+    state.deliveryEvents = (full.deliveryEvents ?? []).filter(event => visibleLetterIds.has(event.letterId))
+    state.reviews = []
+    state.people = full.people.filter(person => person.id === identity.uid || state.pairs.some(pair => [pair.childId, pair.volunteerId].includes(person.id)))
+  }
+  state.letters = state.letters.map(letter => {
+    if (account.role !== 'teacher' && account.role !== 'operator') return letter
+    const pair = store.state.pairs.find(pair => pair.id === letter.pairId)
+    const editableTeacherDraft = account.role === 'teacher' && letter.moderation === 'draft' && letter.createdBy === identity.uid && !!pair && teacherHasScope(store, identity.uid, pair.childId, 'capture', store.state.clock, pair.schoolId)
+    return editableTeacherDraft ? letter : {
+      ...letter,
+      title: '',
+      body: '',
+      riddleId: undefined,
+      attachmentId: undefined,
+      manuscriptAssetId: undefined,
+      ocrRunId: undefined,
+      approvedRenditionId: undefined,
+      submissionVersions: [],
+      moderationNote: undefined,
+    }
+  })
+  const readableLetterIds = new Set(state.letters.map(letter => letter.id))
+  state.deliveryEvents = (state.deliveryEvents ?? []).filter(item => readableLetterIds.has(item.letterId))
+  state.manuscriptAssets = []
+  if (account.role === 'teacher' || account.role === 'operator') state.ocrRuns = []
+  state.helpCases = (state.helpCases ?? []).filter(item => {
+    try { authorizeHelpCaseContent(store, identity, item.id); return true } catch { return false }
+  }).map(item => {
+    const visible = item.requesterId === identity.uid ? requesterHelpCaseProjection(item) : item
+    return { ...visible, body: '', resolution: undefined, history: [] }
+  })
+  const mayManageAssignments = account.role === 'operator' && (account.permissions.includes('accounts') || account.permissions.includes('followup'))
+  state.teacherAssignments = mayManageAssignments ? store.state.teacherAssignments ?? [] : account.role === 'teacher' ? (store.state.teacherAssignments ?? []).filter(item => item.teacherId === identity.uid) : []
+  const schoolIds = new Set(state.teacherAssignments.map(item => item.schoolId))
+  state.schools = mayManageAssignments ? store.state.schools ?? [] : (store.state.schools ?? []).filter(item => schoolIds.has(item.id))
+  state.followups = state.followups.filter(item => item.kind !== 'help')
+  state.attachments = account.role === 'teacher' || account.role === 'operator' ? [] : state.attachments.map(({ blob: _blob, storagePath: _storagePath, ...safe }) => safe)
   state.people = state.people.map(person => { const { guardianName: _name, ...safe } = person as Person & { guardianName?: string }; return safe })
-  if (account.role === 'operator' && !account.permissions.includes('help')) state.followups = state.followups.filter(item => item.kind !== 'help')
   const profile = state.people.find(person => person.id === identity.uid)
   requireValue(profile, '账号资料尚未完成，请联系运营', 'PROFILE_MISSING')
   return { state, profile, revision: store.revision, account: { ...account, application: store.applications.find(item => item.userId === identity.uid) } }
@@ -65,13 +145,17 @@ export async function executeSnapshot(repository: Repository, identity: Identity
     store.state = refreshState(store.state, now)
     return { result: snapshot(store, identity), changed: JSON.stringify(original) !== JSON.stringify(store.state.followups) }
   })
-  if (!viewed.changed) return viewed.result
-  return repository.transact(store => {
+  const result = !viewed.changed ? viewed.result : await repository.transact(store => {
     getAccount(store, identity)
     syncPermissions(store)
     store.state = refreshState(store.state, now)
     return snapshot(store, identity)
   })
+  if (result.account.role === 'teacher') {
+    const childIds = [...new Set(result.state.pairs.map(pair => pair.childId))]
+    for (const childId of childIds.length ? childIds : [identity.uid]) await appendAccessAudit(repository, { id: randomUUID(), actorId: identity.uid, targetType: 'teacher-overview', targetId: childId, decision: 'allowed', purpose: childIds.length ? 'assigned-child-status' : 'assigned-children-empty-overview', at: now })
+  }
+  return result
 }
 function audit(store: Store, actorId: string, action: string, targetId?: string) {
   store.audit.push({ id: randomUUID(), actorId, action, targetId, at: store.state.clock })
@@ -84,15 +168,18 @@ export function throttle(store: Store, key: string, now: string, limit = 60) {
   requireValue(next.count <= limit, '操作有些频繁，请稍后再试', 'RATE_LIMITED'); store.rates[key] = next
   for (const [id, value] of Object.entries(store.rates)) if (value.minute < minute - 2) delete store.rates[id]
 }
-const commandTypes = new Set(['match', 'save-letter', 'submit-letter', 'review-letter', 'print', 'deliver', 'read', 'pause-pair', 'resume-pair', 'end-pair', 'extend-task', 'help', 'resolve-followup', 'assign-followup', 'reopen-followup'])
+const commandTypes = new Set(['match', 'assign-teacher', 'revoke-teacher-assignment', 'save-letter', 'submit-letter', 'review-letter', 'assign-review', 'release-held-letter', 'print', 'deliver', 'witness-read', 'read', 'pause-pair', 'pause-volunteer', 'resume-pair', 'end-pair', 'extend-task', 'help', 'claim-help-case', 'assign-help-case', 'resolve-help-case', 'resolve-followup', 'assign-followup', 'reopen-followup'])
 function resultId(command: Command, previous: AppState, next: AppState): string {
   if (command.type === 'match') return next.pairs.find(item => !previous.pairs.some(old => old.id === item.id))?.id ?? next.pairs.find(item => item.status !== 'ended' && item.childId === command.childId && item.volunteerId === command.volunteerId)?.id ?? ''
+  if (command.type === 'assign-teacher') return next.teacherAssignments?.find(item => !previous.teacherAssignments?.some(old => old.id === item.id))?.id ?? ''
+  if (command.type === 'pause-volunteer') return command.volunteerId
   if (command.type === 'save-letter') return command.id ?? next.letters.find(item => !previous.letters.some(old => old.id === item.id))?.id ?? ''
-  if (command.type === 'help') return next.followups.find(item => !previous.followups.some(old => old.id === item.id))?.id ?? ''
+  if (command.type === 'help') return next.helpCases?.find(item => !previous.helpCases?.some(old => old.id === item.id))?.id ?? ''
   return 'id' in command && typeof command.id === 'string' ? command.id : ''
 }
 export async function executeCommand(repository: Repository, identity: Identity, input: { command: Command; requestId: string; expectedRevision?: number }, now = new Date().toISOString()) {
   return repository.transact(store => {
+    const command = input.command
     const account = getAccount(store, identity, true)
     syncPermissions(store)
     requireValue(typeof input.requestId === 'string' && /^[a-zA-Z0-9_-]{12,100}$/.test(input.requestId), '缺少有效的操作编号')
@@ -100,11 +187,57 @@ export async function executeCommand(repository: Repository, identity: Identity,
     requireValue(!('file' in input.command) && !('actorId' in input.command), '请通过安全附件接口上传图片')
     requireValue(JSON.stringify(input.command).length < 30000, '内容过长，请缩短后再试')
     if (input.command.type === 'save-letter') { text(input.command.body, '正文', 12000, true); text(input.command.title ?? '', '标题', 120, true) }
-    if (['match', 'pause-pair', 'resume-pair', 'end-pair', 'extend-task'].includes(input.command.type)) operator(account)
+    if (['match', 'resume-pair', 'end-pair', 'extend-task'].includes(input.command.type)) operator(account)
+    if (command.type === 'pause-pair') {
+      if (account.role === 'teacher') {
+        const pair = store.state.pairs.find(item => item.id === command.id)
+        requireValue(pair && teacherHasScope(store, identity.uid, pair.childId, 'paper-delivery', now, pair.schoolId), '没有停止这组学校交付的权限', 'FORBIDDEN')
+      } else operator(account, 'followup')
+    }
+    if (command.type === 'pause-volunteer') operator(account, 'help')
+    if (command.type === 'assign-teacher') {
+      if (account.role === 'operator') operator(account, 'followup')
+      else {
+        requireValue(account.role === 'teacher' && teacherCoordinatesSchool(store, identity.uid, command.schoolId, now), '没有本校老师指派权限', 'FORBIDDEN')
+        requireValue(command.teacherId !== identity.uid && !command.scope.includes('school-coordinate'), '校内协调老师不能给自己扩权或授予协调权限', 'FORBIDDEN')
+      }
+    }
+    if (command.type === 'revoke-teacher-assignment') {
+      const assignmentId = command.id
+      const assignment = store.state.teacherAssignments?.find(item => item.id === assignmentId)
+      requireValue(assignment, '这条老师指派不存在', 'INVALID_ACTION')
+      if (account.role === 'operator') operator(account, 'followup')
+      else requireValue(account.role === 'teacher' && teacherCoordinatesSchool(store, identity.uid, assignment.schoolId, now) && assignment.teacherId !== identity.uid && !assignment.scope.includes('school-coordinate'), '没有撤销这条指派的权限', 'FORBIDDEN')
+    }
     if (input.command.type === 'review-letter') operator(account, 'moderate')
+    if (input.command.type === 'release-held-letter') operator(account, 'moderate')
+    if (input.command.type === 'assign-review') operator(account, 'followup')
+    if (['claim-help-case', 'assign-help-case', 'resolve-help-case'].includes(input.command.type)) operator(account, 'help')
     if (['resolve-followup', 'assign-followup', 'reopen-followup'].includes(input.command.type)) {
       const item = store.state.followups.find(item => item.id === (input.command as { id: string }).id)
       operator(account, item?.kind === 'help' ? 'help' : 'followup')
+    }
+    if (input.command.type === 'match' && (store.state.schools?.length || store.state.teacherAssignments?.length)) {
+      requireValue(teacherHasScope(store, input.command.teacherId, input.command.childId, 'status', now), '学校尚未指派有效的负责老师', 'FORBIDDEN')
+    }
+    if (account.role === 'teacher' && command.type === 'save-letter') {
+      const pairId = command.pairId
+      const pair = store.state.pairs.find(item => item.id === pairId)
+      requireValue(pair && teacherHasScope(store, identity.uid, pair.childId, 'capture', now, pair.schoolId), '没有这位孩子当前的纸信协助授权', 'FORBIDDEN')
+    }
+    if (account.role === 'teacher' && command.type === 'submit-letter') {
+      const letterId = command.id
+      const letter = store.state.letters.find(item => item.id === letterId)
+      const pair = store.state.pairs.find(item => item.id === letter?.pairId)
+      requireValue(pair && teacherHasScope(store, identity.uid, pair.childId, 'capture', now, pair.schoolId), '没有这位孩子当前的纸信协助授权', 'FORBIDDEN')
+    }
+    if (account.role === 'teacher' && ['print', 'deliver', 'witness-read'].includes(input.command.type)) {
+      const ids = 'ids' in input.command ? input.command.ids : 'id' in input.command ? [input.command.id] : []
+      requireValue(Array.isArray(ids) && ids.length > 0 && ids.every(id => {
+        const letter = store.state.letters.find(item => item.id === id)
+        const pair = store.state.pairs.find(item => item.id === letter?.pairId)
+        return !!pair && teacherHasScope(store, identity.uid, pair.childId, 'paper-delivery', now, pair.schoolId)
+      }), '没有这些纸信的当前交付授权', 'FORBIDDEN')
     }
     const key = `${identity.uid}:${input.requestId}`; const hash = digest(JSON.stringify(input.command)); const previous = store.receipts[key]
     if (previous) { requireValue(previous.hash === hash, '操作编号已用于其他内容', 'CONFLICT'); return { ...snapshot(store, identity), resultId: previous.resultId } }
@@ -137,7 +270,7 @@ export function accountStatus(store: Store, identity: Identity) {
     invites: store.invites.filter(item => accountManager || item.createdBy === identity.uid).map(({ tokenHash: _token, activationId: _activation, ...safe }) => safe),
     consents: store.consents.filter(item => privacyManager || item.teacherId === identity.uid).map(item => ({ ...item, childId: item.childId ?? '', status: item.withdrawnAt ? 'withdrawn' : 'recorded' })),
     privacyRequests: store.privacyRequests.filter(item => privacyManager || item.userId === identity.uid).map(item => ({ ...item, requesterId: item.userId, resolution: item.note })),
-    accounts: (accountManager ? Object.values(store.accounts) : account.role === 'teacher' ? Object.values(store.accounts).filter(item => item.role === 'child' && store.state.people.some(person => person.id === item.uid && person.teacherId === identity.uid)) : []).map(item => ({ id: item.uid, uid: item.uid, role: item.role, status: item.status, nickname: store.state.people.find(person => person.id === item.uid)?.nickname ?? '参与者' })),
+    accounts: (accountManager ? Object.values(store.accounts) : account.role === 'teacher' ? Object.values(store.accounts).filter(item => item.role === 'child' && teacherHasScope(store, identity.uid, item.uid, 'status')) : []).map(item => ({ id: item.uid, uid: item.uid, role: item.role, status: item.status, nickname: store.state.people.find(person => person.id === item.uid)?.nickname ?? '参与者' })),
   }
 }
 export async function executeAccountAction(repository: Repository, identity: Identity, action: string, payload: Record<string, unknown>, now = new Date().toISOString()) {
@@ -180,12 +313,13 @@ export async function executeAccountAction(repository: Repository, identity: Ide
       const email = role === 'child' ? undefined : text(payload.email, '被邀请人的邮箱', 200)
       requireValue(!email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email), '邮箱格式不正确')
       const requestedPermissions = role === 'operator' ? (payload.permissions === undefined ? ['moderate', 'followup'] : payload.permissions) : []
-      requireValue(Array.isArray(requestedPermissions) && requestedPermissions.every(permission => typeof permission === 'string' && ['accounts', 'moderate', 'followup', 'help', 'privacy'].includes(permission) && account.permissions.includes(permission)), '不能授予超出自身范围的权限', 'FORBIDDEN')
+      requireValue(Array.isArray(requestedPermissions) && requestedPermissions.every(permission => typeof permission === 'string' && ['accounts', 'moderate', 'followup', 'help', 'help-independent', 'privacy'].includes(permission) && account.permissions.includes(permission)), '不能授予超出自身范围的权限', 'FORBIDDEN')
+      requireValue(!requestedPermissions.includes('help-independent') || requestedPermissions.includes('help'), '独立保护人员还须具备保护处理权限')
       const token = randomBytes(32).toString('base64url'); const invite: Invite = { id: randomUUID(), tokenHash: digest(token), role: role as Invite['role'], nickname: text(payload.nickname, '昵称', 30), email, permissions: [...requestedPermissions], teacherId, createdBy: identity.uid, createdAt: now, expiresAt: new Date(Date.parse(now) + 72 * 3600000).toISOString(), status: 'open', consentId }
       store.invites.push(invite); store.revision++; audit(store, identity.uid, action, invite.id); return { token, expiresAt: invite.expiresAt, id: invite.id }
     } else if (action === 'withdraw-consent') {
       const childId = text(payload.childId, '孩子账号', 100); const child = store.state.people.find(person => person.id === childId && person.role === 'child')
-      requireValue(child && ((account.role === 'teacher' && child.teacherId === identity.uid) || (account.role === 'operator' && account.permissions.includes('privacy'))), '没有此项操作权限', 'FORBIDDEN')
+      requireValue(child && ((account.role === 'teacher' && teacherHasScope(store, identity.uid, childId, 'status', now)) || (account.role === 'operator' && account.permissions.includes('privacy'))), '没有此项操作权限', 'FORBIDDEN')
       const reason = text(payload.reason, '撤回说明', 1000)
       for (const consent of store.consents.filter(item => item.childId === childId && !item.withdrawnAt)) { consent.withdrawnAt = now; consent.reason = reason }
       child.guardianConsent = false; child.accountStatus = 'disabled'; store.accounts[childId].status = 'disabled'
@@ -237,12 +371,87 @@ export function authorizeAttachment(store: Store, identity: Identity, id: string
   syncPermissions(store)
   requireValue(attachment, '图片不存在', 'NOT_FOUND')
   requireValue(!attachment.deletingAt, '图片正在清理，请刷新后重试', 'NOT_FOUND')
-  const ownerId = (attachment as typeof attachment & { ownerId?: string }).ownerId
-  const person = store.state.people.find(item => item.id === account.uid)!
+  const ownerId = attachment.ownerId
+  const approved = store.state.letters.find(item => item.approvedRenditionId === id)
   const current = store.state.letters.find(item => item.attachmentId === id)
-  const historical = store.state.letters.find(item => item.submissionVersions?.some(version => version.attachmentId === id))
-  const currentAccess = current && canReadLetter(store.state, person, current)
-  const historyAccess = historical && (historical.authorId === identity.uid || historical.createdBy === identity.uid || (account.role === 'operator' && account.permissions.includes('moderate')))
-  requireValue(ownerId === identity.uid || currentAccess || historyAccess, '无权查看这张图片', 'FORBIDDEN')
+  const historical = store.state.letters.find(item => item.submissionVersions?.some(version => version.attachmentId === id || version.approvedRenditionId === id))
+  if (approved) {
+    authorizeLetterContent(store, identity, approved.id)
+    requireValue(approved.moderation === 'approved' || approved.authorId === identity.uid || approved.createdBy === identity.uid || account.role === 'operator', '这份图像副本尚未获准展示', 'FORBIDDEN')
+  } else if (current) {
+    authorizeLetterContent(store, identity, current.id)
+    if (current.manuscriptAssetId || current.ocrRunId || current.approvedRenditionId) {
+      const assignedReviewer = account.role === 'operator' && current.moderation === 'pending' && current.reviewAssigneeId === identity.uid
+      const draftAssistant = account.role === 'teacher' && current.moderation === 'draft' && current.createdBy === identity.uid
+      requireValue(current.authorId === identity.uid || current.createdBy === identity.uid || assignedReviewer || draftAssistant, '私有原稿不能作为收件人附件读取', 'FORBIDDEN')
+    }
+  } else if (historical) {
+    requireValue((account.role === 'child' || account.role === 'volunteer') && (historical.authorId === identity.uid || historical.createdBy === identity.uid), '无权查看这张历史图片', 'FORBIDDEN')
+  } else if (account.role === 'teacher') {
+    const pair = store.state.pairs.find(item => item.id === attachment.pairId)
+    requireValue(ownerId === identity.uid && pair && teacherHasScope(store, identity.uid, pair.childId, 'capture', store.state.clock, pair.schoolId), '这张图片不在当前拍摄协助任务内', 'FORBIDDEN')
+  } else {
+    requireValue((account.role === 'child' || account.role === 'volunteer') && ownerId === identity.uid, '无权查看这张图片', 'FORBIDDEN')
+  }
   return attachment as typeof attachment & { storagePath: string; ownerId: string }
+}
+
+export async function executeAttachmentContentRead(repository: Repository, identity: Identity, id: string, now = new Date().toISOString()) {
+  return auditedRead(repository, identity, 'attachment', id, 'letter-image-or-capture-task', store => authorizeAttachment(store, identity, id), now, (store, attachment) => {
+    const letter = store.state.letters.find(item => item.attachmentId === attachment.id || item.approvedRenditionId === attachment.id || item.submissionVersions?.some(version => version.attachmentId === attachment.id || version.approvedRenditionId === attachment.id))
+    const version = letter?.attachmentId === attachment.id || letter?.approvedRenditionId === attachment.id ? letter.revision : letter?.submissionVersions?.find(item => item.attachmentId === attachment.id || item.approvedRenditionId === attachment.id)?.revision
+    const approval = letter && [...store.state.reviews].reverse().find(item => item.letterId === letter.id && item.decision === 'approved')
+    return { versionId: version == null ? undefined : `${letter!.id}:${version}`, approvalId: approval?.id }
+  })
+}
+
+export function authorizeLetterContent(store: Store, identity: Identity, id: string) {
+  const account = getAccount(store, identity, true)
+  syncPermissions(store)
+  const actor = store.state.people.find(person => person.id === identity.uid)
+  const letter = store.state.letters.find(item => item.id === id)
+  requireValue(actor && letter, '信件不存在', 'NOT_FOUND')
+  const pair = store.state.pairs.find(item => item.id === letter.pairId)
+  requireValue(pair, '结对不存在', 'NOT_FOUND')
+  if (account.role === 'teacher') {
+    const capture = letter.createdBy === identity.uid && letter.moderation === 'draft' && teacherHasScope(store, identity.uid, pair.childId, 'capture', store.state.clock, pair.schoolId)
+    const printTask = pair.status === 'active' && letter.authorId === pair.volunteerId && letter.recipientId === pair.childId && letter.deliveryRoute === 'school-paper' && letter.moderation === 'approved' && teacherHasScope(store, identity.uid, pair.childId, 'paper-delivery', store.state.clock, pair.schoolId) && !store.state.deliveries.some(item => item.letterId === letter.id && item.deliveredAt)
+    requireValue(capture || printTask, '这封信不在当前协助或打印任务内', 'FORBIDDEN')
+    if (printTask) return approvedLetterProjection(letter)
+  } else if (account.role === 'operator') {
+    requireValue(account.permissions.includes('moderate') && letter.moderation === 'pending' && letter.reviewAssigneeId === identity.uid, '没有分派给你的待审信件', 'FORBIDDEN')
+  } else {
+    requireValue(canReadLetter(store.state, actor, letter), '这封信不在你的可读范围内', 'FORBIDDEN')
+    if (letter.authorId !== identity.uid) return approvedLetterProjection(letter)
+  }
+  return letter
+}
+
+export async function executeLetterContentRead(repository: Repository, identity: Identity, id: string, now = new Date().toISOString()) {
+  return auditedRead(repository, identity, 'letter', id, 'correspondence-or-assigned-task', store => authorizeLetterContent(store, identity, id), now, (store, letter) => {
+    const approval = [...store.state.reviews].reverse().find(item => item.letterId === letter.id && item.decision === 'approved')
+    return { versionId: `${letter.id}:${letter.revision ?? 0}`, approvalId: approval?.id }
+  })
+}
+
+export function authorizeHelpCaseContent(store: Store, identity: Identity, id: string) {
+  const account = getAccount(store, identity, true)
+  const item = store.state.helpCases?.find(item => item.id === id)
+  requireValue(item, '保护事项不存在', 'NOT_FOUND')
+  requireValue(!item.excludedActorIds.includes(identity.uid) && item.reportedPersonId !== identity.uid, '没有这项保护事项的访问权限', 'FORBIDDEN')
+  const requester = item.requesterId === identity.uid
+  const activeCase = item.status !== 'resolved'
+  const assignedOperator = activeCase && account.role === 'operator' && account.permissions.includes('help') && [item.ownerId, item.backupOwnerId].includes(identity.uid) && (item.reportedParty !== 'operator' || account.permissions.includes('help-independent'))
+  const assignedTeacher = activeCase && account.role === 'teacher' && item.schoolOwnerId === identity.uid && (() => {
+    const pair = item.pairId ? store.state.pairs.find(pair => pair.id === item.pairId) : undefined
+    const childId = pair?.childId ?? (store.state.people.find(person => person.id === item.requesterId)?.role === 'child' ? item.requesterId : undefined)
+    const schoolId = pair?.schoolId ?? store.state.people.find(person => person.id === childId)?.schoolId
+    return !!childId && teacherHasScope(store, identity.uid, childId, 'protect', store.state.clock, schoolId)
+  })()
+  requireValue(requester || assignedOperator || assignedTeacher, '没有这项保护事项的访问权限', 'FORBIDDEN')
+  return requester ? requesterHelpCaseProjection(item) : item
+}
+
+export async function executeHelpCaseContentRead(repository: Repository, identity: Identity, id: string, now = new Date().toISOString()) {
+  return auditedRead(repository, identity, 'help-case', id, 'assigned-safeguarding-case', store => authorizeHelpCaseContent(store, identity, id), now)
 }

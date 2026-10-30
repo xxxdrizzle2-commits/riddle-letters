@@ -1,4 +1,4 @@
-import { getAccount, requireValue, ServiceError, type Identity, type Store } from './core'
+import { getAccount, requireValue, ServiceError, teacherHasScope, type Identity, type Store } from './core'
 import type { Attachment } from '../src/types'
 
 export const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024
@@ -18,7 +18,7 @@ export function authorizeAttachmentUpload(store: Store, identity: Identity, pair
   requireValue(pair && (
     (account.role === 'child' && pair.childId === identity.uid) ||
     (account.role === 'volunteer' && pair.volunteerId === identity.uid) ||
-    (account.role === 'teacher' && pair.teacherId === identity.uid && pair.channel === 'paper')
+    (account.role === 'teacher' && teacherHasScope(store, identity.uid, pair.childId, 'capture', store.state.clock, pair.schoolId))
   ), '不能为这组伙伴上传图片', 'FORBIDDEN')
 }
 
@@ -33,7 +33,7 @@ export function attachmentForDeletion(store: Store, identity: Identity, id: stri
   const attachment = store.state.attachments.find(item => item.id === id)
   if (!attachment) return undefined
   requireValue(attachment.ownerId === identity.uid, '只有上传图片的账号可以清理它', 'FORBIDDEN')
-  const referenced = store.state.letters.some(letter => letter.attachmentId === id || letter.submissionVersions?.some(version => version.attachmentId === id))
+  const referenced = store.state.letters.some(letter => letter.attachmentId === id || letter.approvedRenditionId === id || letter.submissionVersions?.some(version => version.attachmentId === id || version.approvedRenditionId === id))
   requireValue(!referenced, '图片仍保存在书信或历史版本中，不能删除', 'ATTACHMENT_IN_USE')
   return attachment
 }
@@ -41,7 +41,7 @@ export function attachmentForDeletion(store: Store, identity: Identity, id: stri
 export function assertDeleteMarker(store: Store, id: string, marker: string) {
   const attachment = store.state.attachments.find(item => item.id === id)
   requireValue(attachment?.deletingAt === marker, '图片清理状态已变化，请刷新后重试', 'CONFLICT')
-  const referenced = store.state.letters.some(letter => letter.attachmentId === id || letter.submissionVersions?.some(version => version.attachmentId === id))
+  const referenced = store.state.letters.some(letter => letter.attachmentId === id || letter.approvedRenditionId === id || letter.submissionVersions?.some(version => version.attachmentId === id || version.approvedRenditionId === id))
   requireValue(!referenced, '图片已用于书信，不能清理', 'ATTACHMENT_IN_USE')
   return attachment
 }

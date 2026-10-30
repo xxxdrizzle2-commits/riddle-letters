@@ -65,28 +65,29 @@ export function HelpPage({state,actor,notify=()=>{},mode='demo'}:Partial<PagePro
     : []
   async function submit(event:FormEvent){
     event.preventDefault()
-    if(!actor || actor.role==='operator' || !reportedParty || reportedParty==='operator')return
+    if(!actor || actor.role==='operator' || !reportedParty)return
     const ok=await run(async()=>{
       await dispatch(actor.id,{type:'help',pairId:pairId||undefined,reportedParty,reportedPersonId:reportedPersonId||undefined,body})
       setBody('')
-    },mode==='demo'?'演示求助已保存在当前浏览器，不会通知真实工作人员。':'求助已记录在成年合成试测数据中，供有权限的试测账号查看。')
+    },mode==='demo'?'演示求助已进入本浏览器的受限队列，尚待合成保护身份接手；不会通知真实工作人员。':'求助已进入成年合成试测的受限队列，当前仅表示已保存，尚待独立保护账号接手。')
     if(ok)setSubmitted(true)
   }
   return <div className="container public-page">
     <BackLink fallbackTo={actor ? '/space' : '/choose'} fallbackLabel={actor ? `返回${roleHome}` : '返回身份入口'}/>
     <PageHeader eyebrow="找人帮忙" title="有困难时，可以说出来。" description={mode==='demo'?'这里只体验合成数据的求助流程，不会通知真实工作人员。':'这里供成年参与者用合成身份试测求助流程，不提供正式儿童保护服务。'}/>
-    {submitted&&<Notice>{mode==='demo'?<>演示求助已保存在当前浏览器，可切换运营演示身份查看；不会通知真实工作人员。 <Link className="text-button" to="/demo/start/operator">切换演示身份</Link></>:'求助已记录在成年合成账号试测数据中，等待有保护权限的试测账号查看。这里不是实时求助渠道。'}</Notice>}
+    {submitted&&<Notice>{mode==='demo'?<>演示求助已进入受限队列，状态为“尚待接手”；不会通知真实工作人员。可切换未涉事的保护运营演示身份核对绕行。 <Link className="text-button" to="/demo/start/operator">切换演示身份</Link></>:'求助已进入成年合成账号试测的受限队列，状态为“尚待接手”。这里不是实时求助渠道，也不表示已有工作人员开始处理。'}</Notice>}
     <div className="account-grid"><section className="panel stack">
       <h2><HeartHandshake size={20}/> 说明遇到的问题</h2>
       {actor?.role==='operator'?<Notice>运营人员需要通过独立于本账号的现实渠道反映问题；此处不受理运营账号的站内求助。</Notice>:actor?<form className="auth-form" onSubmit={submit}>
         <div className="field"><label htmlFor="help-party">这件事主要与谁有关？</label><select id="help-party" value={reportedParty} required onChange={event=>{setReportedParty(event.target.value as typeof reportedParty);setReportedPersonId('');setPairId('');setSubmitted(false)}}>
           <option value="" disabled>请先选择</option><option value="volunteer">书信伙伴</option><option value="teacher">协助老师</option><option value="operator">运营人员</option><option value="other">其他事情／暂时不方便说</option>
         </select><p className="field-help">选择仅用于把求助交给合适的人，不会自动分享给被反映的人。</p></div>
-        {reportedParty==='operator'?<Notice tone="warning">当前成年合成试测没有可核实的独立运营投诉接手人，请勿在这里填写涉及运营人员的敏感内容。请在现实中联系学校指定负责人或项目负责人；若涉及正在发生的危险，及时向当地有关部门求助。真实试点开放前必须公布独立联系人和替补。</Notice>:reportedParty&&<>
+        {reportedParty&&<>
+          {reportedParty==='operator'&&<Notice>可以只选择“运营人员”这一类别，不需要知道姓名。求助会绕开普通运营队列；若当前没有可独立接手的保护值守，提交时会明确提示并引导现实渠道。</Notice>}
           {relevantPeople.length>0&&<div className="field"><label htmlFor="help-person">涉及哪位人员？（可不选）</label><select id="help-person" value={reportedPersonId} onChange={event=>setReportedPersonId(event.target.value)}><option value="">不确定或不方便选择</option>{relevantPeople.map(person=><option value={person.id} key={person.id}>{person.nickname}</option>)}</select></div>}
           {relatedPairs.length>0&&<div className="field"><label htmlFor="help-pair">与哪组书信有关？（可不选）</label><select id="help-pair" value={pairId} onChange={event=>{setPairId(event.target.value);setReportedPersonId('')}}><option value="">不指定结对</option>{relatedPairs.map(pair=><option value={pair.id} key={pair.id}>{state?.people.find(person=>person.id===pair.childId)?.nickname??'小朋友'} ↔ {state?.people.find(person=>person.id===pair.volunteerId)?.nickname??'志愿者'}</option>)}</select></div>}
           <div className="field"><label htmlFor="help-body">想说的话</label><textarea id="help-body" value={body} onChange={event=>setBody(event.target.value)} required minLength={2} maxLength={2000} placeholder="可以从“我希望得到什么帮助”写起。"/></div>
-          <button className="btn" disabled={busy||body.trim().length<2}>{busy?'正在提交…':mode==='demo'?'提交演示求助':'提交试测求助'}</button>{error&&<p role="alert" className="field-error">{error}</p>}
+          <button className="btn" disabled={busy||body.trim().length<2}>{busy?'正在提交…':mode==='demo'?'提交到演示受限队列':'提交到试测受限队列'}</button>{error&&<p role="alert" className="field-error">{error}</p>}
         </>}
       </form>:<p>如果无法登录，请在现实中联系负责老师或试测负责人。需要马上获得帮助时，请告诉身边信任的大人。</p>}
     </section><aside className="panel"><h2>求助会怎样处理？</h2><ol className="journey"><li><span>1</span><p>{mode==='demo'?'演示求助只存于当前浏览器，切换演示身份可查看。':'站内求助仅供成年合成账号试测，按保护权限限制读取。'}</p></li><li><span>2</span><p>这里不是即时聊天，也没有已公布的正式值守时间；提交成功只代表记录已保存。</p></li><li><span>3</span><p>需要及时保护时，直接联系现实中信任的成年人或有权部门。</p></li></ol></aside></div>
@@ -95,6 +96,6 @@ export function HelpPage({state,actor,notify=()=>{},mode='demo'}:Partial<PagePro
 export function PrivacyPage(){return <div className="container public-page"><PageHeader eyebrow="隐私说明" title="认真保护每一封信。" description="当前仅供成年人使用合成身份和内容演示，正式儿童试点尚未开放。"/><div className="panel stack" style={{maxWidth:800,margin:'0 auto'}}>
   <Notice>{cloudConfigured?'当前 V3 站点使用预置的成年合成试测账号；书信和操作记录经云端服务保存在试测数据库，由有权限的试测账号共享。':'当前 V2 演示使用虚构身份；书信和操作记录保存在此浏览器。'} 请勿输入真实儿童的姓名、联系方式、照片或私人信件。</Notice>
   <section><h2>两个演示环境的数据范围</h2><p>V2 Demo 在当前浏览器保存合成数据；V3 成年账号试测使用独立的 Cloudflare Pages Functions 与 D1 数据库。两者不共用业务数据。云端试测并不表示可以处理真实儿童资料。</p></section>
-  <section><h2>真实儿童试点前须确认</h2><p>学校与平台需明确数据处理责任、监护告知与儿童意愿、人员的最小访问范围、保存和删除期限、独立求助渠道及云服务数据流向。儿童纸信的拍摄、识别和例行审阅还需由合作学校与法律专业人员确认合法路径；当前未开放手写图片和 OCR。</p></section>
+  <section><h2>真实儿童试点前须确认</h2><p>学校与平台需明确数据处理责任、监护告知与儿童意愿、人员的最小访问范围、保存和删除期限、独立求助渠道及云服务数据流向。儿童纸信的拍摄、识别和例行审阅还需由合作学校与法律专业人员确认合法路径；当前仅开放成年合成样本的本地手写图与忠实转写演示，真实儿童入口仍关闭。</p></section>
   <section><h2>参与者的选择</h2><p>正式试点应提供资料查阅、撤回和删除申请，并在参与前说明每种资料的用途与可见人员。公开故事仅使用虚构内容。</p></section>
   <Notice>本页说明现有演示与待办事项。项目尚未公布正式儿童试点的负责人联系方式、值守时段、资料保存期限和监护告知材料。</Notice><Link className="btn secondary" to="/">回到身份入口</Link></div></div>}

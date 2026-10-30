@@ -1,4 +1,4 @@
-import type { AppState, Command, Person } from '../types'
+import type { AppState, Command, HelpCase, Letter, Person } from '../types'
 
 /** Set only on the V3 adult-trial build; the V2 demo uses browser-local data. */
 export const cloudConfigured = import.meta.env.VITE_V3_PREVIEW === 'true'
@@ -32,6 +32,17 @@ export async function signOut(): Promise<void> {
 export async function cloudSnapshot(): Promise<Snapshot> {
   if (!cloudConfigured) return unavailable()
   return request<Snapshot>('/api/snapshot')
+}
+/** Sensitive bodies are fetched only for the selected object and audited by the server. */
+export async function cloudLetter(id: string): Promise<Letter> {
+  if (!cloudConfigured) return unavailable()
+  const result = await request<{ letter: Letter }>(`/api/letters/${encodeURIComponent(id)}`)
+  return result.letter
+}
+export async function cloudHelpCase(id: string): Promise<HelpCase> {
+  if (!cloudConfigured) return unavailable()
+  const result = await request<{ case: HelpCase }>(`/api/help-cases/${encodeURIComponent(id)}`)
+  return result.case
 }
 export async function cloudDispatch(command: Command, options: { requestId: string; expectedRevision?: number }): Promise<Snapshot & { resultId: string }> {
   if (!cloudConfigured) return unavailable()

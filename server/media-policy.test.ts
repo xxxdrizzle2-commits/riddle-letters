@@ -11,6 +11,9 @@ function baseStore() {
   }
   store.state.pairs.push({ id: 'paper-pair', childId: 'child-1', volunteerId: 'volunteer-1', teacherId: 'teacher-1', channel: 'paper', status: 'active', startedAt: store.state.clock })
   store.state.pairs.push({ id: 'online-pair', childId: 'child-2', volunteerId: 'volunteer-2', teacherId: 'teacher-2', channel: 'online', status: 'active', startedAt: store.state.clock })
+  store.state.schools = [{ id: 'school-1', name: '合成学校', status: 'active' }]
+  store.state.pairs[0].schoolId = 'school-1'
+  store.state.teacherAssignments = [{ id: 'assignment-1', schoolId: 'school-1', teacherId: 'teacher-1', childId: 'child-1', scope: ['capture'], startsAt: '2026-10-01T00:00:00.000Z', endsAt: '2026-11-01T00:00:00.000Z', approvedBy: 'school-owner' }]
   return store
 }
 
@@ -54,5 +57,12 @@ describe('attachment role and quota policy', () => {
     expectCode(() => attachmentForDeletion(store, identity('volunteer-1'), 'asset'), 'FORBIDDEN')
     store.state.letters.push({ id: 'letter', pairId: 'paper-pair', authorId: 'child-1', createdBy: 'child-1', title: '你好', body: '', attachmentId: 'asset', moderation: 'draft', createdAt: store.state.clock, updatedAt: store.state.clock })
     expectCode(() => attachmentForDeletion(store, identity('child-1'), 'asset'), 'ATTACHMENT_IN_USE')
+  })
+
+  it('keeps an approved redacted rendition while a letter or frozen version references it', () => {
+    const store = baseStore()
+    store.state.attachments.push({ id: 'approved', pairId: 'paper-pair', name: 'approved.webp', type: 'image/webp', ownerId: 'child-1', storagePath: 'attachments/approved.webp', size: 100 })
+    store.state.letters.push({ id: 'letter', pairId: 'paper-pair', authorId: 'child-1', createdBy: 'teacher-1', title: '你好', body: '忠实转写', approvedRenditionId: 'approved', moderation: 'approved', createdAt: store.state.clock, updatedAt: store.state.clock })
+    expectCode(() => attachmentForDeletion(store, identity('child-1'), 'approved'), 'ATTACHMENT_IN_USE')
   })
 })

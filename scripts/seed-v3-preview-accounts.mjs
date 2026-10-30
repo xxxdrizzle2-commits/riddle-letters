@@ -6,13 +6,13 @@ import { hashPassword } from 'better-auth/crypto'
 import { getPlatformProxy } from 'wrangler'
 
 const roles = [
-  { role: 'child', example: '小树', subtitle: '试测登录 · 合成孩子角色', avatar: '🌱', interests: ['谜语', '植物', '画画'] },
-  { role: 'volunteer', example: '林溪', subtitle: '试测登录 · 合成志愿者角色', avatar: '✉️', interests: ['阅读', '散步', '观察'] },
-  { role: 'teacher', example: '周老师', subtitle: '试测登录 · 合成老师角色', avatar: '📚', interests: [] },
-  { role: 'operator', example: '运营同学', subtitle: '试测登录 · 合成运营角色', avatar: '🪴', interests: [] },
+  { key: 'child', role: 'child', example: '小树', subtitle: '试测登录 · 成年合成孩子角色', avatar: '🌱', interests: ['谜语', '植物', '画画'] },
+  { key: 'volunteer', role: 'volunteer', example: '林溪', subtitle: '试测登录 · 成年合成志愿者角色', avatar: '✉️', interests: ['阅读', '散步', '观察'] },
+  { key: 'teacher', role: 'teacher', example: '周老师', subtitle: '试测登录 · 成年合成老师角色', avatar: '📚', interests: [] },
+  { key: 'operator', role: 'operator', example: '运营同学', subtitle: '试测登录 · 合成运营角色', avatar: '🪴', interests: [] },
+  { key: 'independent-operator', role: 'operator', example: '独立保护值守', subtitle: '试测登录 · 独立保护合成角色', avatar: '🛡️', interests: [] },
 ]
-const operatorPermissions = ['accounts', 'moderate', 'followup', 'help', 'privacy']
-const permissionsFor = role => role === 'operator' ? operatorPermissions : []
+const permissionsFor = item => item.key === 'operator' ? ['accounts', 'moderate', 'followup', 'help', 'privacy'] : item.key === 'independent-operator' ? ['help', 'help-independent'] : []
 const escapeSql = value => `'${String(value).replaceAll("'", "''")}'`
 const rl = createInterface({ input, output })
 const ask = async (label, fallback = '') => {
@@ -34,12 +34,12 @@ const askSecret = async label => {
 
 let proxy
 try {
-  const consent = await ask('确认仅给四位成年测试者创建合成角色账号？请输入 ADULT-ONLY')
+  const consent = await ask('确认仅给五位成年测试者创建合成角色账号（含独立保护值守）？请输入 ADULT-ONLY')
   if (consent !== 'ADULT-ONLY') throw new Error('未确认成人合成数据边界，已停止。')
 
   const users = []
   for (const item of roles) {
-    output.write(`\n${item.role} 角色账号\n`)
+    output.write(`\n${item.key} 角色账号\n`)
     const email = (await ask('试测邮箱')).toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error(`邮箱格式不正确：${email || '空值'}`)
     const name = await ask('工作区显示称呼', item.example)
@@ -57,19 +57,21 @@ try {
   })
   const db = proxy.env.DB
   if (!db) throw new Error('没有找到本机 D1 绑定。请先应用 V3 Preview 迁移。')
-  const schema = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('user', 'app_meta', 'app_accounts', 'app_people')").all()
+  const schema = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('user', 'app_meta', 'app_accounts', 'app_people', 'app_schools', 'app_teacher_assignments')").all()
   const available = new Set(schema.results.map(row => row.name))
-  for (const table of ['user', 'app_meta', 'app_accounts', 'app_people']) if (!available.has(table)) throw new Error(`本机 D1 缺少 ${table} 表；请先运行 npm run db:v3-preview:migrate。`)
+  for (const table of ['user', 'app_meta', 'app_accounts', 'app_people', 'app_schools', 'app_teacher_assignments']) if (!available.has(table)) throw new Error(`本机 D1 缺少 ${table} 表；请先运行 npm run db:v3-preview:migrate。`)
 
   const emails = users.map(user => user.email)
   const existing = await db.prepare(`SELECT email FROM "user" WHERE email IN (${emails.map(() => '?').join(',')})`).bind(...emails).all()
   if (existing.results.length) throw new Error(`以下邮箱已经存在，未修改数据库：${existing.results.map(row => row.email).join(', ')}`)
 
-  const teacher = users.find(user => user.role === 'teacher')
+  const teacher = users.find(user => user.key === 'teacher')
+  const child = users.find(user => user.key === 'child')
+  const syntheticSchoolId = `synthetic-school-${child.id}`
   const now = new Date().toISOString()
   const statements = []
   for (const user of users) {
-    const permissions = permissionsFor(user.role)
+    const permissions = permissionsFor(user)
     const profile = {
       id: user.id,
       role: user.role,
@@ -82,7 +84,8 @@ try {
       // This marker belongs only to this generated synthetic fixture; it is not a real child or guardian record.
       guardianConsent: user.role === 'child' ? true : undefined,
       teacherId: user.role === 'child' ? teacher.id : undefined,
-      permissions: user.role === 'operator' ? ['review', 'safeguarding', 'administration'] : undefined,
+      schoolId: user.role === 'child' || user.role === 'teacher' ? syntheticSchoolId : undefined,
+      permissions: user.key === 'operator' ? ['review', 'safeguarding', 'administration'] : user.key === 'independent-operator' ? ['safeguarding', 'independentSafeguarding'] : undefined,
     }
     const account = { uid: user.id, role: user.role, status: 'active', permissions, createdAt: now }
     const passwordHash = await hashPassword(user.password)
@@ -93,9 +96,18 @@ try {
       db.prepare('INSERT INTO app_people (id, role, nickname, teacher_id, account_status, data_json) VALUES (?, ?, ?, ?, ?, ?)').bind(user.id, user.role, user.name, profile.teacherId ?? null, 'active', JSON.stringify(profile)),
     )
   }
+  const assignmentEnd = new Date(Date.parse(now) + 365 * 24 * 60 * 60 * 1000).toISOString()
+  const school = { id: syntheticSchoolId, name: '成年合成身份试测学校', status: 'active' }
+  const childAssignment = { id: randomUUID(), schoolId: syntheticSchoolId, teacherId: teacher.id, childId: child.id, scope: ['status', 'capture', 'paper-delivery', 'protect'], startsAt: now, endsAt: assignmentEnd, approvedBy: 'synthetic-seed' }
+  const coordinatorAssignment = { id: randomUUID(), schoolId: syntheticSchoolId, teacherId: teacher.id, scope: ['status', 'protect', 'school-coordinate'], startsAt: now, endsAt: assignmentEnd, approvedBy: 'synthetic-seed' }
+  statements.push(
+    db.prepare('INSERT INTO app_schools (id, name, status, data_json) VALUES (?, ?, ?, ?)').bind(school.id, school.name, school.status, JSON.stringify(school)),
+    db.prepare('INSERT INTO app_teacher_assignments (id, school_id, teacher_id, child_id, scope_json, starts_at, ends_at, revoked_at, approved_by, data_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(childAssignment.id, childAssignment.schoolId, childAssignment.teacherId, childAssignment.childId, JSON.stringify(childAssignment.scope), childAssignment.startsAt, childAssignment.endsAt, null, childAssignment.approvedBy, JSON.stringify(childAssignment)),
+    db.prepare('INSERT INTO app_teacher_assignments (id, school_id, teacher_id, child_id, scope_json, starts_at, ends_at, revoked_at, approved_by, data_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(coordinatorAssignment.id, coordinatorAssignment.schoolId, coordinatorAssignment.teacherId, null, JSON.stringify(coordinatorAssignment.scope), coordinatorAssignment.startsAt, coordinatorAssignment.endsAt, null, coordinatorAssignment.approvedBy, JSON.stringify(coordinatorAssignment)),
+  )
   await db.batch(statements)
-  output.write('\n已在本机 V3 Preview D1 创建 4 个成人测试账号和合成角色资料。\n')
-  for (const user of users) output.write(`- ${user.role}: ${user.email}\n`)
+  output.write('\n已在本机 V3 Preview D1 创建 5 个成人测试账号、合成学校与限期老师指派。\n')
+  for (const user of users) output.write(`- ${user.key}: ${user.email}\n`)
   output.write('密码只保存在你输入时的内存中，并以哈希写入本机数据库；没有账号对应真实儿童。\n')
 } finally {
   rl.close()
