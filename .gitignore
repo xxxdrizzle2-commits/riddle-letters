@@ -16,3 +16,5 @@ work/
 .sites-*
 .finesse/
 .wrangler/
+# 本地 V3 启动器为新版 Wrangler 临时生成，进程退出后会清理
+/wrangler.jsonc

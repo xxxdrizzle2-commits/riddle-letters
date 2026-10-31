@@ -10,7 +10,7 @@ export type PolicyAction =
   | 'report-abnormal' | 'open-case'
   | 'grant-access' | 'revoke-access'
   | 'open-emergency-access' | 'review-emergency-access'
-  | 'update-help-report' | 'escalate-help-case' | 'resolve-help-case'
+  | 'triage-help-case' | 'update-help-report' | 'escalate-help-case' | 'resolve-help-case'
   | 'open-dispute' | 'decide-dispute'
   | 'review-risk-signal' | 'complete-support-task' | 'complete-training'
   | 'match' | 'write-letter' | 'submit-letter' | 'pause-volunteer' | 'resume-pair' | 'record-delivery'
@@ -129,13 +129,34 @@ export function grantIsActive(grant: AccessGrant | undefined, now: string): gran
 
 function grantFor(state: AppState, actorId: string, targetType: AccessTargetType, targetId: string, now: string, purposes?: AccessPurpose[]): AccessGrant | undefined {
   return (state.accessGrants ?? []).find(item => item.actorId === actorId && item.targetType === targetType && item.targetId === targetId
-    && (!purposes || purposes.includes(item.purpose)) && grantIsActive(item, now))
+    && (!purposes || purposes.includes(item.purpose)) && grantIsActive(item, now) && grantMatchesCase(state, item))
 }
 
 export const activeGrantCount = (state: AppState, actorId: string, now: string) =>
   (state.accessGrants ?? []).filter(item => item.actorId === actorId && grantIsActive(item, now)).length
 
 const isSensitiveTarget = (type: AccessTargetType) => type === 'letter' || type === 'attachment' || type === 'help-case'
+
+function grantMatchesCase(state: AppState, grant: AccessGrant): boolean {
+  if (grant.emergency || !isSensitiveTarget(grant.targetType)) return true
+  const helpCase = grant.caseId ? helpCaseById(state, grant.caseId) : undefined
+  if (!helpCase || helpCase.status === 'resolved' || isExcluded(helpCase, grant.actorId)) return false
+  if (grant.targetType === 'help-case') return grant.targetId === helpCase.id
+  const letter = grant.targetType === 'letter'
+    ? letterById(state, grant.targetId)
+    : state.letters.find(item => item.attachmentId === grant.targetId || item.approvedRenditionId === grant.targetId || item.submissionVersions?.some(version => version.attachmentId === grant.targetId || version.approvedRenditionId === grant.targetId))
+  return !!letter && !!helpCase.pairId && letter.pairId === helpCase.pairId
+}
+
+export function helpReportComplete(helpCase: HelpCase): boolean {
+  if (helpCase.severity !== 'high' || !helpCase.reportRequired) return true
+  if (helpCase.reportDecision === 'not-required') {
+    return !!helpCase.reportReason && !!helpCase.reportReviewedBy
+      && helpCase.reportReviewedBy !== helpCase.ownerId
+      && helpCase.reportReviewedBy !== helpCase.schoolOwnerId
+  }
+  return !!helpCase.reportedAt && !!helpCase.reportAuthority && !!helpCase.reportReceipt
+}
 
 export function hasSchoolSeat(state: AppState, userId: string, schoolId: string, now: string) {
   return !!schoolAuthority(state, userId, schoolId, now, 'safeguarding-lead') || !!schoolAuthority(state, userId, schoolId, now, 'principal')
@@ -148,7 +169,7 @@ function disputeForPair(state: AppState, pairId: string): DisputeCase | undefine
 }
 
 function safetySuspension(pair: Pair): boolean {
-  return (pair.pauseReason ?? '').includes('保护性暂停') || (pair.pauseReason ?? '').includes('安全风险')
+  return (pair.pauseReason ?? '').includes('保护性暂停') || (pair.pauseReason ?? '').includes('安全风险') || (pair.pauseReason ?? '').includes('学校停止交付')
 }
 
 /** Pure authorization. It never writes, logs, or throws. */
@@ -321,10 +342,12 @@ export function authorize(input: PolicyInput): PolicyDecision {
       if ((note ?? '').trim().length < 3) return deny('请写下至少 3 字的复核结论。', 'NOTE_TOO_SHORT')
       return allow()
     }
+    case 'triage-help-case':
     case 'update-help-report': {
       const helpCase = resource.id ? helpCaseById(state, resource.id) : undefined
       if (!helpCase) return deny('保护个案不存在。', 'RESOURCE_NOT_FOUND')
       if (isExcluded(helpCase, actor.id)) return deny('被反映人或回避人员不能填写报告。', 'EXCLUDED_ACTOR')
+      if (action === 'update-help-report' && op && hasPackage(actor, 'privacy')) return allow()
       if (op && hasPackage(actor, 'safeguarding') && [helpCase.ownerId, helpCase.backupOwnerId].includes(actor.id)) return allow()
       if (actor.role === 'teacher' && helpCase.schoolOwnerId === actor.id && safeguardingSeat(state, actor.id, now)) return allow()
       return deny('没有填写这个个案报告的权限。', 'NO_ASSIGNMENT')
@@ -339,11 +362,7 @@ export function authorize(input: PolicyInput): PolicyDecision {
       const helpCase = resource.id ? helpCaseById(state, resource.id) : undefined
       if (!helpCase) return deny('保护个案不存在。', 'RESOURCE_NOT_FOUND')
       if (isExcluded(helpCase, actor.id)) return deny('被反映人不能关闭这个个案。', 'EXCLUDED_ACTOR')
-      if (helpCase.severity === 'high' && helpCase.reportRequired) {
-        if (helpCase.reportDecision === 'not-required') {
-          if (!helpCase.reportReason || !helpCase.reportReviewedBy || helpCase.reportReviewedBy === actor.id) return deny('免报告结论需要理由与另一名复核人。', 'REPORT_FIELDS_INCOMPLETE')
-        } else if (!helpCase.reportedAt || !helpCase.reportAuthority || !helpCase.reportReceipt) return deny('高严重度个案必须先填写报告机关与回执。', 'REPORT_FIELDS_INCOMPLETE')
-      }
+      if (!helpReportComplete(helpCase)) return deny('高严重度个案必须先完成报告记录或独立免报告复核。', 'REPORT_FIELDS_INCOMPLETE')
       if ((note ?? '').trim().length < 3) return deny('请记录至少 3 字的处理情况。', 'NOTE_TOO_SHORT')
       if (op && hasPackage(actor, 'safeguarding') && [helpCase.ownerId, helpCase.backupOwnerId].includes(actor.id)) return allow()
       if (actor.role === 'teacher' && helpCase.schoolOwnerId === actor.id) return allow()

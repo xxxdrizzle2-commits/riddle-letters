@@ -78,7 +78,7 @@ export function AttachmentView({ state, id }: { state: AppState; id?: string }) 
 }
 
 function HandwritingReader({ state, letter }: { state: AppState; letter: Letter }) {
-  const run = state.ocrRuns?.find(item => item.id === letter.ocrRunId && item.letterId === letter.id && item.status === 'completed')
+  const run = letter.authorizedOcrRun ?? state.ocrRuns?.find(item => item.id === letter.ocrRunId && item.letterId === letter.id && item.status === 'completed')
   const rendition = state.attachments.find(item => item.id === letter.approvedRenditionId)
   const [view, setView] = useState<'transcript' | 'image'>('transcript')
   const [selectedLine, setSelectedLine] = useState<string>()

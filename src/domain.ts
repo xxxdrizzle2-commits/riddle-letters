@@ -1,6 +1,6 @@
 import type { AppState, Attachment, Command, DeliveryRoute, HelpCase, Letter, Person, ReplyTask, Riddle, TeacherScope, TimeInterval } from './types'
 import { TRAINING_VERSION } from './types'
-import { authorize, teacherScope, eligibleHelpOwner, hasPackage, trainingFor } from './policy'
+import { authorize, teacherScope, eligibleHelpOwner, hasPackage, helpReportComplete, isExcluded, trainingFor } from './policy'
 import { syntheticDigest } from './evidence'
 
 const DAY = 86_400_000
@@ -34,7 +34,7 @@ export function createSeedState(): AppState {
       { id: 't2', role: 'teacher', schoolId: 'school-b', nickname: '周老师', subtitle: '协助阿川收发纸质书信 · 演示学校保护负责人', avatar: '📖', interests: [] },
       { id: 't3', role: 'teacher', schoolId: 'school-a', nickname: '林老师', subtitle: '合成替补 · 演示学校甲保护备岗', avatar: '📘', interests: [] },
       { id: 't4', role: 'teacher', schoolId: 'school-b', nickname: '何老师', subtitle: '合成替补 · 演示学校乙保护备岗', avatar: '📗', interests: [] },
-      { id: 'op1', role: 'operator', nickname: '小满', subtitle: '陪伴计划运营 · 守护每一次交流', avatar: '✉️', interests: [], permissions: ['review', 'safeguarding', 'administration'] },
+      { id: 'op1', role: 'operator', nickname: '运营同学', subtitle: '陪伴计划运营 · 守护每一次交流', avatar: '✉️', interests: [], permissions: ['review', 'safeguarding', 'administration'] },
       { id: 'op2', role: 'operator', nickname: '独立保护值守', subtitle: '合成身份 · 独立受理涉及运营的求助', avatar: '🛡️', interests: [], accountStatus: 'active', permissions: ['safeguarding', 'independentSafeguarding'] },
       { id: 'op3', role: 'operator', nickname: '隐私与结对岗', subtitle: '合成身份 · 隐私复核与结对待办', avatar: '🗂️', interests: [], accountStatus: 'active', permissions: ['privacy', 'accounts', 'matching'] },
     ],
@@ -160,6 +160,7 @@ export function deliveryRouteForLetter(state: AppState, letter: Letter): Deliver
 }
 
 export function canHandleHelpCase(state: AppState, actor: Person, helpCase: HelpCase): boolean {
+  if (![helpCase.ownerId, helpCase.backupOwnerId, helpCase.schoolOwnerId].includes(actor.id)) return false
   return authorize({ actor, action: 'read-help-case', resource: { type: 'help-case', id: helpCase.id }, purpose: 'safeguarding-case', state, now: state.clock }).decision === 'allow'
 }
 
@@ -211,7 +212,8 @@ export function normalizeState(previous: AppState): AppState {
   state.planPolicies ??= [{ id: 'main', childMaxActivePairs: 2, volunteerMaxActivePairs: 2, newPairCooldownDays: 7 }]
   for (const helpCase of state.helpCases) {
     helpCase.severity ??= 'medium'
-    helpCase.reportRequired ??= false
+    helpCase.reportRequired ??= helpCase.severity === 'high'
+    helpCase.slaDueAt ??= addDays(helpCase.createdAt, helpCase.severity === 'high' ? .25 : helpCase.severity === 'medium' ? 1 : 3)
   }
   for (const grant of state.accessGrants) grant.emergency ??= false
   for (const letter of state.letters) {
@@ -286,7 +288,15 @@ export function scopeState(previous: AppState, actorId: string): AppState {
   const casePeople = visibleHelpCases.flatMap(helpCase => helpCase.requesterId === actorId ? [] : [helpCase.requesterId, helpCase.reportedPersonId].filter((id): id is string => !!id))
   const relatedIds = new Set([actorId, ...state.pairs.flatMap(p => [p.childId, p.volunteerId, p.teacherId]), ...casePeople])
   state.people = state.people.filter(p => administered || relatedIds.has(p.id) || (actor.role === 'teacher' && p.role === 'child' && hasTeacherScope(state, actorId, p.id, 'status')) || state.followups.some(f => f.kind === 'help' && f.requesterId === p.id && canHandleHelp(actor, f)))
-  state.letters = visibleLetters(state, actor).map(letter => {
+  const directlyReadable = visibleLetters(state, actor)
+  const directlyReadableIds = new Set(directlyReadable.map(letter => letter.id))
+  const statusPairIds = new Set(state.pairs.map(pair => pair.id))
+  const teacherStatusLetters = actor.role === 'teacher'
+    ? state.letters.filter(letter => statusPairIds.has(letter.pairId) && (letter.moderation === 'approved' || letter.createdBy === actorId))
+    : []
+  const scopedLetters = [...directlyReadable, ...teacherStatusLetters.filter(letter => !directlyReadableIds.has(letter.id))]
+  state.letters = scopedLetters.map(letter => {
+    if (!directlyReadableIds.has(letter.id)) return { ...letter, title: '', body: '', riddleId: undefined, attachmentId: undefined, manuscriptAssetId: undefined, ocrRunId: undefined, approvedRenditionId: undefined, submissionVersions: [], moderationNote: undefined }
     if (letter.authorId === actorId || letter.createdBy === actorId && letter.moderation === 'draft' || actor.role === 'operator' && letter.reviewAssigneeId === actorId && letter.moderation === 'pending') return letter
     return approvedLetterProjection(letter)
   })
@@ -659,9 +669,33 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       const pair = pairById(command.id)
       const teacherStop = actor.role === 'teacher' && hasTeacherScope(state, actor.id, pair.childId, 'paper-delivery')
       ensure(hasPermission(actor, 'administration') || teacherStop, '只有平台结对岗或当前负责老师可以停止这组交付。', 'FORBIDDEN')
-      if (pair.status === 'paused') break
+      if (pair.status === 'paused') {
+        pair.pauseOwnerId ??= actor.id
+        pair.pauseReviewAt ??= addDays(state.clock, 7)
+        break
+      }
       ensure(pair.status !== 'ended', '陪伴已结束。'); ensure(command.reason.trim().length >= 2, '请记录暂停原因。')
-      pair.status = 'paused'; pair.pausedAt = state.clock; pair.pauseReason = teacherStop ? `学校停止交付：${command.reason.trim()}` : command.reason.trim(); pair.pauseHistory!.push({ start: state.clock, kind: 'pause', sourceId: teacherStop ? `teacher:${actor.id}` : pair.id })
+      pair.status = 'paused'; pair.pausedAt = state.clock; pair.pauseReason = teacherStop ? `保护性暂停：学校停止交付：${command.reason.trim()}` : command.reason.trim()
+      pair.pauseOwnerId = actor.id; pair.pauseReviewAt = addDays(state.clock, teacherStop ? 3 : 7)
+      pair.pauseHistory!.push({ start: state.clock, kind: 'pause', sourceId: teacherStop ? `teacher:${actor.id}` : pair.id })
+      if (teacherStop) {
+        const ownerRule = { reportedParty: 'other' as const, reportedPersonId: undefined, excludedActorIds: [] as string[] }
+        const owners = state.people.filter(person => eligibleHelpOwner(person, ownerRule))
+        const schoolOwner = state.people.find(person => person.role === 'teacher' && hasTeacherScope(state, person.id, pair.childId, 'protect'))
+        const owner = owners[0] ?? schoolOwner ?? actor
+        const caseId = uid('help-case')
+        state.helpCases!.push({
+          id: caseId, requesterId: actor.id, pairId: pair.id, reportedParty: 'other', excludedActorIds: [], ownerId: owner.id,
+          backupOwnerId: owners.find(person => person.id !== owner.id)?.id, schoolOwnerId: schoolOwner?.id,
+          status: 'open', body: `学校老师已停止本校交付并上报异常：${command.reason.trim()}`,
+          createdAt: state.clock, updatedAt: state.clock, severity: 'medium', slaDueAt: addDays(state.clock, 1), reportRequired: false,
+          history: [{ at: state.clock, actorId: actor.id, note: '学校已立即停止交付，等待未涉事保护负责人接手。' }],
+        })
+        if (!state.disputeCases!.some(item => item.pairId === pair.id && item.status !== 'decided')) {
+          state.disputeCases!.push({ id: uid('dispute'), schoolId: pair.schoolId ?? actor.schoolId ?? '', topic: 'pause', pairId: pair.id, caseId, openedBy: actor.id, openedAt: state.clock, status: 'joint-review', reason: command.reason.trim() })
+        }
+        if (!state.supportTasks!.some(task => task.pairId === pair.id && task.status === 'open')) state.supportTasks!.push({ id: uid('support-task'), childId: pair.childId, caseId, pairId: pair.id, ownerTeacherId: pair.teacherId, dueAt: addDays(state.clock, 3), status: 'open', note: '学校停止交付后，请确认孩子近况与需要的支持。' })
+      }
       break
     }
     case 'pause-volunteer': {
@@ -732,20 +766,22 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
         if (reportedParty !== 'operator') ensure(state.pairs.some(p => [p.childId, p.volunteerId, p.teacherId].includes(actor.id) && [p.childId, p.volunteerId, p.teacherId].includes(reportedPerson.id)), '请选择与你有关的人员。', 'FORBIDDEN')
       }
       const inferredReportedId = reportedPerson?.id ?? (reportedParty === 'teacher' ? pair?.teacherId : reportedParty === 'volunteer' ? pair?.volunteerId : undefined)
-      const excludedActorIds = inferredReportedId ? [inferredReportedId] : []
+      const unknownOperator = reportedParty === 'operator' && !reportedPerson
+      const excludedActorIds = unknownOperator ? state.people.filter(person => person.role === 'operator').map(person => person.id) : inferredReportedId ? [inferredReportedId] : []
       const ownerRule = { reportedParty, reportedPersonId: reportedPerson?.id, excludedActorIds }
       const owners = state.people.filter(person => eligibleHelpOwner(person, ownerRule))
-      const owner = owners[0]
-      ensure(owner, '当前没有可独立接手的保护人员，请联系学校或项目指定负责人。')
       const childId = actor.role === 'child' ? actor.id : pair?.childId
       // When a child only knows that a teacher is involved, no teacher receives
       // the case until the independent platform handler has clarified conflicts.
       const unknownTeacher = reportedParty === 'teacher' && !reportedPerson
       const schoolOwner = childId && !unknownTeacher ? state.people.find(person => person.role === 'teacher' && !excludedActorIds.includes(person.id) && hasTeacherScope(state, person.id, childId, 'protect')) : undefined
+      const owner = unknownOperator ? schoolOwner : owners[0] ?? schoolOwner
+      ensure(owner, '当前没有可独立接手的保护人员，请使用页面列明的校方或外部渠道。')
       const helpCase: HelpCase = {
         id: uid('help-case'), requesterId: actor.id, pairId: pair?.id, reportedParty, reportedPersonId: reportedPerson?.id,
         excludedActorIds, ownerId: owner.id, backupOwnerId: owners[1]?.id, schoolOwnerId: schoolOwner?.id,
         status: 'open', body: command.body.trim(), createdAt: state.clock, updatedAt: state.clock,
+        severity: 'medium', slaDueAt: addDays(state.clock, 1), reportRequired: false,
         history: [{ at: state.clock, actorId: actor.id, note: '已提交求助，等待独立保护人员接手。' }],
       }
       state.helpCases!.push(helpCase)
@@ -775,12 +811,10 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
     case 'resolve-help-case': {
       const helpCase = state.helpCases!.find(item => item.id === command.id)
       ensure(helpCase, '这个保护个案不存在。')
-      ensure(canHandleHelpCase(state, actor, helpCase), '你不能关闭这个保护个案。', 'FORBIDDEN')
+      const decision = authorize({ actor, action: 'resolve-help-case', resource: { type: 'help-case', id: helpCase.id }, purpose: 'safeguarding-case', state, now: state.clock, note: command.note })
+      ensure(decision.decision === 'allow', decision.decision === 'deny' ? decision.reason : '', 'FORBIDDEN')
       if (helpCase.status === 'resolved') break
-      if (helpCase.severity === 'high' && helpCase.reportRequired) {
-        if (helpCase.reportDecision === 'not-required') ensure(!!helpCase.reportReason && !!helpCase.reportReviewedBy && helpCase.reportReviewedBy !== actor.id, '免报告结论需要理由与另一名复核人。', 'FORBIDDEN')
-        else ensure(!!helpCase.reportedAt && !!helpCase.reportAuthority && !!helpCase.reportReceipt, '高严重度个案必须先填写报告机关与回执。', 'FORBIDDEN')
-      }
+      ensure(helpReportComplete(helpCase), '高严重度个案必须先完成报告记录或独立免报告复核。', 'FORBIDDEN')
       ensure(command.note.trim().length >= 3 && command.note.length <= 2000, '请记录至少 3 字的处理情况。')
       helpCase.status = 'resolved'; helpCase.resolution = command.note.trim(); helpCase.updatedAt = state.clock
       helpCase.history.push({ at: state.clock, actorId: actor.id, note: command.note.trim() })
@@ -807,21 +841,31 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       ensure(target, '请选择这封信、这张图片或这个保护个案。')
       const grantee = state.people.find(person => person.id === command.userId)
       ensure(grantee && grantee.accountStatus !== 'disabled', '请选择有效的受权账号。')
+      ensure(['safeguarding-case', 'audit-review', 'data-request'].includes(command.purpose), '日常协助与打印权限不能通过人工授权扩大。', 'FORBIDDEN')
+      const helpCase = state.helpCases!.find(item => item.id === command.caseId)
+      ensure(helpCase && helpCase.status !== 'resolved', '访问授权必须关联一个未结案的保护个案。', 'FORBIDDEN')
+      ensure(!isExcluded(helpCase, actor.id) && !isExcluded(helpCase, grantee.id), '被反映人或回避人员不能签发或取得访问授权。', 'FORBIDDEN')
+      const linkedLetter = command.targetType === 'letter' ? state.letters.find(item => item.id === targetId)
+        : command.targetType === 'attachment' ? state.letters.find(item => item.attachmentId === targetId || item.approvedRenditionId === targetId || item.submissionVersions?.some(version => version.attachmentId === targetId || version.approvedRenditionId === targetId)) : undefined
+      ensure(command.targetType === 'help-case' ? targetId === helpCase.id : !!helpCase.pairId && linkedLetter?.pairId === helpCase.pairId, '受权对象与保护个案没有可核对的关联。', 'FORBIDDEN')
+      const qualifiedGrantee = grantee.role === 'operator' && (hasPermission(grantee, 'safeguarding') || hasPermission(grantee, 'privacy'))
+        || grantee.role === 'teacher' && helpCase.schoolOwnerId === grantee.id
+      ensure(qualifiedGrantee, '只能授权给该个案中未涉事的保护或隐私处理人。', 'FORBIDDEN')
       ensure(command.reason.trim().length >= 5, '请写明至少 5 字的访问理由。')
       ensure(Number.isFinite(Date.parse(command.expiresAt)) && Date.parse(command.expiresAt) > Date.parse(state.clock), '授权到期时间应晚于现在。')
       ensure(Date.parse(command.expiresAt) - Date.parse(state.clock) <= 30 * DAY, '单次授权最长 30 天，到期后请重新审批。')
-      const sensitive = command.targetType === 'help-case' || command.purpose === 'audit-review' || command.purpose === 'data-request'
-      const pending = state.accessGrants!.find(grant => grant.actorId === command.userId && grant.targetType === command.targetType && grant.targetId === targetId && grant.purpose === command.purpose && !grant.revokedAt && !grant.approvedBy)
+      const pending = state.accessGrants!.find(grant => grant.actorId === command.userId && grant.targetType === command.targetType && grant.targetId === targetId && grant.caseId === command.caseId && grant.purpose === command.purpose && !grant.revokedAt && !grant.approvedBy)
       if (pending) {
-        ensure(actor.id !== pending.grantedBy, '第二签名必须由另一位负责人完成。', 'FORBIDDEN')
+        ensure(actor.id !== pending.grantedBy && actor.id !== pending.actorId, '第二签名必须由另一位、且不是受权人的负责人完成。', 'FORBIDDEN')
         const second = authorize({ actor, action: 'grant-access', resource: { type: 'none' }, purpose: command.purpose, state, now: state.clock })
         ensure(second.decision === 'allow', second.decision === 'deny' ? second.reason : '', 'FORBIDDEN')
         pending.approvedBy = actor.id
         break
       }
+      ensure(actor.id !== grantee.id, '访问申请人不能给自己签发授权，须由另一位负责人发起。', 'FORBIDDEN')
       const decision = authorize({ actor, action: 'grant-access', resource: { type: 'none' }, purpose: command.purpose, state, now: state.clock })
       ensure(decision.decision === 'allow', decision.decision === 'deny' ? decision.reason : '', 'FORBIDDEN')
-      state.accessGrants!.push({ id: uid('access-grant'), actorId: command.userId, targetType: command.targetType, targetId, purpose: command.purpose, reason: command.reason.trim(), grantedBy: actor.id, approvedBy: sensitive ? undefined : actor.id, startsAt: state.clock, expiresAt: new Date(command.expiresAt).toISOString() })
+      state.accessGrants!.push({ id: uid('access-grant'), actorId: command.userId, targetType: command.targetType, targetId, caseId: command.caseId, purpose: command.purpose, reason: command.reason.trim(), grantedBy: actor.id, startsAt: state.clock, expiresAt: new Date(command.expiresAt).toISOString() })
       break
     }
     case 'revoke-access': {
@@ -855,20 +899,42 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       grant.reason = `${grant.reason}（复核${command.decision === 'upheld' ? '维持' : '撤销'}：${command.note.trim()}）`
       break
     }
+    case 'triage-help-case': {
+      const helpCase = state.helpCases!.find(item => item.id === command.id)
+      ensure(helpCase && helpCase.status !== 'resolved', '这个保护个案不存在或已经结束。')
+      const decision = authorize({ actor, action: 'triage-help-case', resource: { type: 'help-case', id: helpCase.id }, purpose: 'safeguarding-case', state, now: state.clock })
+      ensure(decision.decision === 'allow', decision.decision === 'deny' ? decision.reason : '', 'FORBIDDEN')
+      ensure(command.note.trim().length >= 3, '请记录至少 3 字的分诊依据。')
+      const rank = { low: 1, medium: 2, high: 3 }
+      if (helpCase.triagedAt) {
+        ensure(rank[command.severity] >= rank[helpCase.severity ?? 'medium'], '已分诊个案只能提高严重度，不能由原处理人降低。', 'FORBIDDEN')
+        ensure(!helpCase.reportRequired || command.reportRequired, '已要求报告的个案不能由原处理人取消。', 'FORBIDDEN')
+      }
+      ensure(command.severity !== 'high' || command.reportRequired, '高严重度个案必须进入报告要求。')
+      helpCase.severity = command.severity; helpCase.reportRequired = command.reportRequired
+      helpCase.triagedAt = state.clock; helpCase.triagedBy = actor.id; helpCase.triageNote = command.note.trim()
+      helpCase.slaDueAt = new Date(Date.parse(state.clock) + (command.severity === 'high' ? 4 : command.severity === 'medium' ? 24 : 72) * 3600000).toISOString()
+      helpCase.updatedAt = state.clock
+      helpCase.history.push({ at: state.clock, actorId: actor.id, note: `分诊为${command.severity === 'high' ? '高' : command.severity === 'medium' ? '中' : '低'}严重度：${command.note.trim()}` })
+      break
+    }
     case 'update-help-report': {
       const helpCase = state.helpCases!.find(item => item.id === command.id)
       ensure(helpCase, '这个保护个案不存在。')
       const decision = authorize({ actor, action: 'update-help-report', resource: { type: 'help-case', id: helpCase.id }, purpose: 'safeguarding-case', state, now: state.clock })
       ensure(decision.decision === 'allow', decision.decision === 'deny' ? decision.reason : '', 'FORBIDDEN')
-      if (command.reportRequired !== undefined) helpCase.reportRequired = command.reportRequired
+      if ('reportRequired' in command) ensure(command.reportRequired === true, '已要求报告的个案不能由负责人自行取消。', 'FORBIDDEN')
+      if (command.reportRequired) helpCase.reportRequired = true
       if (command.reportDecision === 'not-required') {
+        ensure(helpCase.reportRequired, '只有已进入报告要求的个案才能记录免报告复核。')
+        ensure(actor.role === 'operator' && hasPermission(actor, 'privacy') && actor.id !== helpCase.ownerId && actor.id !== helpCase.schoolOwnerId, '免报告结论必须由未参与处理的隐私复核人填写。', 'FORBIDDEN')
         ensure(command.reportReason?.trim().length && command.reportReason.trim().length >= 3, '请写明不构成法定报告的理由。')
         helpCase.reportDecision = 'not-required'; helpCase.reportReason = command.reportReason.trim(); helpCase.reportReviewedBy = actor.id
         helpCase.reportedAt = undefined; helpCase.reportAuthority = undefined; helpCase.reportReceipt = undefined
       } else if (command.reportDecision === 'reported') {
         ensure(command.reportAuthority?.trim().length && command.reportReceipt?.trim().length, '请填写报告机关与回执编号。')
         helpCase.reportDecision = 'reported'; helpCase.reportedAt = state.clock
-        helpCase.reportAuthority = command.reportAuthority.trim(); helpCase.reportReceipt = command.reportReceipt.trim(); helpCase.reportReason = command.reportReason?.trim()
+        helpCase.reportAuthority = command.reportAuthority.trim(); helpCase.reportReceipt = command.reportReceipt.trim(); helpCase.reportReason = command.reportReason?.trim(); helpCase.reportReviewedBy = undefined
       } else {
         if (command.reportAuthority) helpCase.reportAuthority = command.reportAuthority.trim()
         if (command.reportReceipt) helpCase.reportReceipt = command.reportReceipt.trim()
@@ -901,6 +967,12 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       ensure(decision.decision === 'allow', decision.decision === 'deny' ? decision.reason : '', 'FORBIDDEN')
       const pair = command.pairId ? pairById(command.pairId) : undefined
       ensure(!command.pairId || pair?.schoolId === command.schoolId, '争议涉及的结对与学校不一致。')
+      const letter = command.letterId ? state.letters.find(item => item.id === command.letterId) : undefined
+      ensure(!command.letterId || !!letter && (!pair || letter.pairId === pair.id) && state.pairs.find(item => item.id === letter.pairId)?.schoolId === command.schoolId, '争议信件不存在或不属于所选学校与结对。', 'FORBIDDEN')
+      const helpCase = command.caseId ? state.helpCases!.find(item => item.id === command.caseId) : undefined
+      const caseSchoolId = helpCase?.pairId ? state.pairs.find(item => item.id === helpCase.pairId)?.schoolId : state.people.find(item => item.id === helpCase?.requesterId)?.schoolId
+      ensure(!command.caseId || !!helpCase && caseSchoolId === command.schoolId && (!pair || !helpCase.pairId || helpCase.pairId === pair.id), '争议个案不存在或不属于所选学校与结对。', 'FORBIDDEN')
+      ensure(!helpCase || !isExcluded(helpCase, actor.id), '你需要回避这个保护个案关联的争议。', 'FORBIDDEN')
       const safety = ['pause', 'delivery', 'pairing'].includes(command.topic)
       state.disputeCases!.push({ id: uid('dispute'), schoolId: command.schoolId, topic: command.topic, pairId: pair?.id, letterId: command.letterId, caseId: command.caseId, openedBy: actor.id, openedAt: state.clock, status: safety ? 'joint-review' : 'open', reason: command.reason.trim() })
       if (safety && pair && pair.status !== 'ended') {

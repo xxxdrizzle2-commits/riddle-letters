@@ -131,7 +131,8 @@ test('线上完整闭环：保存、审核、阅读、回信审核与持久化',
 test('纸质完整闭环：打印、确认交付、代录和图片回传、审核后阅读', async ({ page }, testInfo) => {
   await as(page, 'teacher', 't2')
   await page.getByRole('link', { name: /进入待打印/ }).click()
-  await page.getByRole('button', { name: new RegExp(paperTitle) }).click()
+  await expect(page.getByText(paperTitle, { exact: true })).toHaveCount(0)
+  await page.locator('.teacher-stage-body .letter-select').first().click()
   await page.evaluate(() => { window.print = () => { document.documentElement.dataset.printCalls = '1' } })
   await page.getByRole('button', { name: '打开打印预览', exact: false }).click()
   await expect(page.locator('html')).toHaveAttribute('data-print-calls', '1')
@@ -188,7 +189,7 @@ test('纸质完整闭环：打印、确认交付、代录和图片回传、审�
 test('负责老师可立即停止本校交付，但不能自行恢复', async ({ page }, testInfo) => {
   await as(page, 'teacher', 't2')
   await page.getByRole('link', { name: /进入待打印/ }).click()
-  await page.getByRole('button', { name: new RegExp(paperTitle) }).click()
+  await page.locator('.teacher-stage-body .letter-select').first().click()
   await page.getByRole('button', { name: '停止本校交付并上报异常', exact: true }).click()
   await page.getByLabel('停止原因', { exact: true }).fill('需要保护性核实')
   await page.getByRole('button', { name: '确认停止并上报异常', exact: true }).click()
@@ -197,6 +198,15 @@ test('负责老师可立即停止本校交付，但不能自行恢复', async ({
   await expect(page.getByRole('button', { name: '恢复陪伴', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: '打开打印预览', exact: false })).toHaveCount(0)
   if (process.env.PW_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.PW_EVIDENCE_DIR}/teacher-stop-delivery-${testInfo.project.name}.png`, fullPage: true })
+})
+
+test('老师历史记录只显示收发状态', async ({ page }) => {
+  await as(page, 'teacher', 't2')
+  await page.getByRole('link', { name: '查看以往处理记录', exact: true }).click()
+  await page.getByRole('button', { name: /纸质来信/ }).first().click()
+  await expect(page.getByRole('heading', { name: '这封信的收发记录' })).toBeVisible()
+  await expect(page.locator('.letter-paper')).toHaveCount(0)
+  await expect(page.getByText('阿川，你好呀！', { exact: false })).toHaveCount(0)
 })
 
 test('退回修改保留原文和意见，可修改后再次审核', async ({ page }) => {

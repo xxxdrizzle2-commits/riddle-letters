@@ -107,11 +107,15 @@ describe('command authorization responses', () => {
       { id: 'assignment-2', schoolId: 'school-2', teacherId: 'teacher-2', childId: 'child-1', scope: ['status', 'paper-delivery'], startsAt: '2026-10-01T00:00:00.000Z', endsAt: '2026-11-01T00:00:00.000Z', approvedBy: 'school-owner-2' },
     ]
     store.state.pairs = [{ id: 'pair-1', childId: 'child-1', volunteerId: 'volunteer-1', teacherId: 'legacy-teacher', schoolId: 'school-1', channel: 'paper', status: 'active', startedAt: store.state.clock }]
-    store.state.letters = [{ id: 'letter-1', pairId: 'pair-1', authorId: 'volunteer-1', recipientId: 'child-1', createdBy: 'volunteer-1', deliveryRoute: 'school-paper', title: '合成来信', body: '仅用于权限测试', attachmentId: 'attachment-1', manuscriptAssetId: 'original-1', ocrRunId: 'ocr-1', approvedRenditionId: 'approved-1', moderation: 'approved', revision: 1, createdAt: store.state.clock, updatedAt: store.state.clock }]
+    store.state.letters = [
+      { id: 'letter-1', pairId: 'pair-1', authorId: 'volunteer-1', recipientId: 'child-1', createdBy: 'volunteer-1', deliveryRoute: 'school-paper', title: '合成来信', body: '仅用于权限测试', attachmentId: 'attachment-1', manuscriptAssetId: 'original-1', ocrRunId: 'ocr-1', approvedRenditionId: 'approved-1', moderation: 'approved', revision: 1, createdAt: store.state.clock, updatedAt: store.state.clock },
+      { id: 'private-draft', pairId: 'pair-1', authorId: 'volunteer-1', recipientId: 'child-1', createdBy: 'volunteer-1', deliveryRoute: 'school-paper', title: '尚未提交', body: '老师不应知道这封草稿存在', moderation: 'draft', revision: 0, createdAt: store.state.clock, updatedAt: store.state.clock },
+    ]
     store.state.deliveries = [{ letterId: 'letter-1' }]
     store.state.attachments = [{ id: 'attachment-1', pairId: 'pair-1', name: 'synthetic-original.webp', type: 'image/webp', ownerId: 'volunteer-1', storagePath: 'attachments/synthetic-original.webp' }, { id: 'approved-1', pairId: 'pair-1', name: 'synthetic-approved.webp', type: 'image/webp', ownerId: 'volunteer-1', storagePath: 'attachments/synthetic-approved.webp' }]
 
     const overview = await executeSnapshot(repository, { uid: 'teacher-1' })
+    expect(overview.state.letters.map(letter => letter.id)).toEqual(['letter-1'])
     expect(overview.state.letters[0]).toMatchObject({ id: 'letter-1', body: '', title: '', attachmentId: undefined, manuscriptAssetId: undefined, ocrRunId: undefined })
     const printView = await executeLetterContentRead(repository, { uid: 'teacher-1' }, 'letter-1')
     expect(printView).toMatchObject({ body: '仅用于权限测试', attachmentId: 'approved-1' })
@@ -120,7 +124,9 @@ describe('command authorization responses', () => {
     await expect(executeAttachmentContentRead(repository, { uid: 'teacher-1' }, 'attachment-1')).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
     await expect(executeCommand(repository, { uid: 'teacher-2' }, { requestId: 'teacher-cross-pause-01', command: { type: 'pause-pair', id: 'pair-1', reason: '跨校测试' } })).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
     await executeCommand(repository, { uid: 'teacher-1' }, { requestId: 'teacher-stop-delivery-01', command: { type: 'pause-pair', id: 'pair-1', reason: '需要保护性核实' } })
-    expect(store.state.pairs[0]).toMatchObject({ status: 'paused', pauseReason: '学校停止交付：需要保护性核实' })
+    expect(store.state.pairs[0]).toMatchObject({ status: 'paused', pauseReason: '保护性暂停：学校停止交付：需要保护性核实', pauseOwnerId: 'teacher-1' })
+    expect(store.state.helpCases).toHaveLength(1)
+    expect(store.state.disputeCases).toEqual([expect.objectContaining({ pairId: 'pair-1', status: 'joint-review' })])
     await expect(executeLetterContentRead(repository, { uid: 'teacher-1' }, 'letter-1')).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
     await expect(executeAttachmentContentRead(repository, { uid: 'teacher-1' }, 'approved-1')).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
     store.state.pairs[0].status = 'active'
@@ -193,6 +199,27 @@ describe('command authorization responses', () => {
     expect(delivered).toMatchObject({ title: '最终安全版本', body: '只保留适合送达的内容。', moderation: 'approved' })
     expect(JSON.stringify(delivered)).not.toContain('wx-sensitive')
     for (const field of ['submissionVersions', 'moderationNote', 'reviewAssigneeId', 'coveredLetterIds', 'childConfirmedAt', 'manuscriptAssetId']) expect(delivered).not.toHaveProperty(field)
+  })
+
+  it('keeps participant snapshot bodies empty and records the separate object read without mutating a read-only snapshot', async () => {
+    const store = emptyStore('2026-10-21T00:00:00.000Z')
+    for (const [uid, role] of [['child-1', 'child'], ['volunteer-1', 'volunteer']] as const) {
+      store.accounts[uid] = { uid, role, status: 'active', permissions: [], createdAt: store.state.clock }
+      store.state.people.push({ id: uid, role, nickname: uid, subtitle: '', avatar: '', interests: [], accountStatus: 'active' })
+    }
+    store.state.pairs = [{ id: 'pair-1', childId: 'child-1', volunteerId: 'volunteer-1', teacherId: 'teacher-1', channel: 'online', status: 'active', startedAt: store.state.clock }]
+    store.state.letters = [{ id: 'letter-1', pairId: 'pair-1', authorId: 'volunteer-1', recipientId: 'child-1', createdBy: 'volunteer-1', deliveryRoute: 'online', title: '合成来信', body: '只能通过逐对象读取取得的正文', moderation: 'approved', revision: 1, createdAt: store.state.clock, updatedAt: store.state.clock }]
+    store.state.deliveries = [{ letterId: 'letter-1', deliveredAt: store.state.clock }]
+    const repository: Repository = { read: operation => operation(store), transact: operation => operation(store) }
+    const before = structuredClone(store)
+
+    const overview = await executeSnapshot(repository, { uid: 'child-1' }, store.state.clock)
+    expect(overview.state.letters[0]).toMatchObject({ id: 'letter-1', title: '合成来信', body: '' })
+    expect(store).toEqual(before)
+    expect(store.accessAudit).toHaveLength(0)
+
+    await expect(executeLetterContentRead(repository, { uid: 'child-1' }, 'letter-1')).resolves.toMatchObject({ body: '只能通过逐对象读取取得的正文' })
+    expect(store.accessAudit).toEqual([expect.objectContaining({ actorId: 'child-1', targetId: 'letter-1', decision: 'allowed' })])
   })
 
   it('lets only safeguarding staff pause every active pair of a volunteer', async () => {

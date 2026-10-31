@@ -102,31 +102,21 @@ export function snapshot(store: Store, identity: Identity) {
     return { state: { ...emptyStore(store.state.clock).state, people: [profile] }, profile, revision: store.revision, account: { ...account, application: store.applications.find(item => item.userId === identity.uid) } }
   }
   const state = scopeState(normalizeState(store.state), identity.uid)
-  if (account.role === 'teacher') {
-    const full = normalizeState(store.state)
-    const allowedPairs = new Set(full.pairs.filter(pair => teacherHasScope(store, identity.uid, pair.childId, 'status', store.state.clock, pair.schoolId)).map(pair => pair.id))
-    state.pairs = full.pairs.filter(pair => allowedPairs.has(pair.id))
-    state.letters = full.letters.filter(letter => allowedPairs.has(letter.pairId))
-    state.tasks = full.tasks.filter(task => allowedPairs.has(task.pairId))
-    const visibleLetterIds = new Set(state.letters.map(letter => letter.id))
-    state.deliveries = full.deliveries.filter(delivery => visibleLetterIds.has(delivery.letterId))
-    state.deliveryEvents = (full.deliveryEvents ?? []).filter(event => visibleLetterIds.has(event.letterId))
-    state.reviews = []
-    state.people = full.people.filter(person => person.id === identity.uid || state.pairs.some(pair => [pair.childId, pair.volunteerId].includes(person.id)))
-  }
   state.letters = state.letters.map(letter => {
-    if (account.role !== 'teacher' && account.role !== 'operator') return letter
     const pair = store.state.pairs.find(pair => pair.id === letter.pairId)
     const editableTeacherDraft = account.role === 'teacher' && letter.moderation === 'draft' && letter.createdBy === identity.uid && !!pair && teacherHasScope(store, identity.uid, pair.childId, 'capture', store.state.clock, pair.schoolId)
-    return editableTeacherDraft ? letter : {
+    if (editableTeacherDraft) return letter
+    const participantMetadata = account.role === 'child' || account.role === 'volunteer'
+    return {
       ...letter,
-      title: '',
+      title: participantMetadata ? letter.title : '',
       body: '',
       riddleId: undefined,
       attachmentId: undefined,
       manuscriptAssetId: undefined,
       ocrRunId: undefined,
       approvedRenditionId: undefined,
+      authorizedOcrRun: undefined,
       submissionVersions: [],
       moderationNote: undefined,
     }
@@ -134,7 +124,7 @@ export function snapshot(store: Store, identity: Identity) {
   const readableLetterIds = new Set(state.letters.map(letter => letter.id))
   state.deliveryEvents = (state.deliveryEvents ?? []).filter(item => readableLetterIds.has(item.letterId))
   state.manuscriptAssets = []
-  if (account.role === 'teacher' || account.role === 'operator') state.ocrRuns = []
+  state.ocrRuns = []
   state.helpCases = (state.helpCases ?? []).filter(item => {
     try { authorizeHelpCaseContent(store, identity, item.id); return true } catch { return false }
   }).map(item => {
@@ -155,10 +145,12 @@ export function snapshot(store: Store, identity: Identity) {
 export async function executeSnapshot(repository: Repository, identity: Identity, now = new Date().toISOString()) {
   const viewed = await repository.read(store => {
     getAccount(store, identity)
-    syncPermissions(store)
-    const original = store.state.followups
-    store.state = refreshState(store.state, now)
-    return { result: snapshot(store, identity), changed: JSON.stringify(original) !== JSON.stringify(store.state.followups) }
+    const preview = structuredClone(store)
+    syncPermissions(preview)
+    const refreshed = refreshState(preview.state, now)
+    const changed = JSON.stringify(store.state) !== JSON.stringify(refreshed)
+    preview.state = refreshed
+    return { result: snapshot(preview, identity), changed }
   })
   const result = !viewed.changed ? viewed.result : await repository.transact(store => {
     getAccount(store, identity)
@@ -183,7 +175,7 @@ export function throttle(store: Store, key: string, now: string, limit = 60) {
   requireValue(next.count <= limit, '操作有些频繁，请稍后再试', 'RATE_LIMITED'); store.rates[key] = next
   for (const [id, value] of Object.entries(store.rates)) if (value.minute < minute - 2) delete store.rates[id]
 }
-const commandTypes = new Set(['match', 'assign-teacher', 'revoke-teacher-assignment', 'save-letter', 'submit-letter', 'review-letter', 'assign-review', 'release-held-letter', 'print', 'deliver', 'witness-read', 'read', 'pause-pair', 'pause-volunteer', 'resume-pair', 'end-pair', 'extend-task', 'help', 'claim-help-case', 'assign-help-case', 'resolve-help-case', 'resolve-followup', 'assign-followup', 'reopen-followup', 'grant-access', 'revoke-access', 'open-emergency-access', 'review-emergency-access', 'update-help-report', 'escalate-help-case', 'open-dispute', 'decide-dispute', 'review-risk-signal', 'complete-support-task', 'complete-training'])
+const commandTypes = new Set(['match', 'assign-teacher', 'revoke-teacher-assignment', 'save-letter', 'submit-letter', 'review-letter', 'assign-review', 'release-held-letter', 'print', 'deliver', 'witness-read', 'read', 'pause-pair', 'pause-volunteer', 'resume-pair', 'end-pair', 'extend-task', 'help', 'claim-help-case', 'assign-help-case', 'resolve-help-case', 'resolve-followup', 'assign-followup', 'reopen-followup', 'grant-access', 'revoke-access', 'open-emergency-access', 'review-emergency-access', 'triage-help-case', 'update-help-report', 'escalate-help-case', 'open-dispute', 'decide-dispute', 'review-risk-signal', 'complete-support-task', 'complete-training'])
 function resultId(command: Command, previous: AppState, next: AppState): string {
   if (command.type === 'match') return next.pairs.find(item => !previous.pairs.some(old => old.id === item.id))?.id ?? next.pairs.find(item => item.status !== 'ended' && item.childId === command.childId && item.volunteerId === command.volunteerId)?.id ?? ''
   if (command.type === 'assign-teacher') return next.teacherAssignments?.find(item => !previous.teacherAssignments?.some(old => old.id === item.id))?.id ?? ''
@@ -229,7 +221,12 @@ export async function executeCommand(repository: Repository, identity: Identity,
     if (input.command.type === 'review-letter') operator(account, 'moderate')
     if (input.command.type === 'release-held-letter') operator(account, 'moderate')
     if (input.command.type === 'assign-review') operator(account, 'followup')
-    if (['claim-help-case', 'assign-help-case', 'resolve-help-case'].includes(input.command.type)) operator(account, 'help')
+    if (['claim-help-case', 'assign-help-case', 'resolve-help-case', 'triage-help-case', 'update-help-report'].includes(input.command.type)) {
+      if (account.role === 'operator') {
+        if (input.command.type === 'update-help-report' && account.permissions.includes('privacy')) operator(account, 'privacy')
+        else operator(account, 'help')
+      } else requireValue(account.role === 'teacher', '这项保护操作需要个案负责人处理', 'FORBIDDEN')
+    }
     if (['resolve-followup', 'assign-followup', 'reopen-followup'].includes(input.command.type)) {
       const item = store.state.followups.find(item => item.id === (input.command as { id: string }).id)
       operator(account, item?.kind === 'help' ? 'help' : 'followup')
@@ -315,7 +312,7 @@ export async function executeAccountAction(repository: Repository, identity: Ide
       item.status = payload.decision as 'approved' | 'returned'; item.note = text(payload.note ?? '', '审核说明', 1000, item.status === 'approved'); item.reviewedBy = identity.uid; item.updatedAt = now
       const target = store.accounts[item.userId]; target.status = item.status === 'approved' ? 'active' : 'pending'
       Object.assign(store.state.people.find(person => person.id === item.userId)!, { accountStatus: target.status, volunteerApproved: item.status === 'approved', subtitle: item.status === 'approved' ? '已通过陪伴审核' : '请查看申请修改意见' })
-      if (item.status === 'returned') for (const pair of store.state.pairs.filter(pair => pair.volunteerId === item.userId && pair.status === 'active')) { pair.status = 'paused'; pair.pausedAt = now; pair.pauseReason = '志愿者资格正在复核'; (pair.pauseHistory ??= []).push({ start: now, kind: 'pause', sourceId: pair.id }) }
+      if (item.status === 'returned') for (const pair of store.state.pairs.filter(pair => pair.volunteerId === item.userId && pair.status === 'active')) { pair.status = 'paused'; pair.pausedAt = now; pair.pauseReason = '志愿者资格正在复核'; pair.pauseOwnerId = identity.uid; pair.pauseReviewAt = new Date(Date.parse(now) + 7 * 86400000).toISOString(); (pair.pauseHistory ??= []).push({ start: now, kind: 'pause', sourceId: pair.id }) }
     } else if (action === 'create-invite') {
       requireValue(account.status === 'active' && ['teacher', 'operator'].includes(account.role), '只有负责老师或运营可以邀请', 'FORBIDDEN')
       const role = payload.role; requireValue(['child', 'teacher', 'operator'].includes(String(role)), '邀请身份不正确')
@@ -340,7 +337,7 @@ export async function executeAccountAction(repository: Repository, identity: Ide
       const reason = text(payload.reason, '撤回说明', 1000)
       for (const consent of store.consents.filter(item => item.childId === childId && !item.withdrawnAt)) { consent.withdrawnAt = now; consent.reason = reason }
       child.guardianConsent = false; child.accountStatus = 'disabled'; store.accounts[childId].status = 'disabled'
-      for (const pair of store.state.pairs.filter(item => item.childId === childId && item.status === 'active')) { pair.status = 'paused'; pair.pausedAt = now; pair.pauseReason = '监护授权已撤回'; (pair.pauseHistory ??= []).push({ start: now, kind: 'pause', sourceId: pair.id }) }
+      for (const pair of store.state.pairs.filter(item => item.childId === childId && item.status === 'active')) { pair.status = 'paused'; pair.pausedAt = now; pair.pauseReason = '监护授权已撤回'; pair.pauseOwnerId = identity.uid; pair.pauseReviewAt = new Date(Date.parse(now) + 7 * 86400000).toISOString(); (pair.pauseHistory ??= []).push({ start: now, kind: 'pause', sourceId: pair.id }) }
     } else if (action === 'privacy-request') {
       requireValue(['export', 'delete', 'withdraw'].includes(String(payload.kind)), '请选择申请类型')
       const prior = store.privacyRequests.find(item => item.userId === identity.uid && item.kind === payload.kind && item.status === 'open')
@@ -355,7 +352,7 @@ export async function executeAccountAction(repository: Repository, identity: Ide
       const person = store.state.people.find(item => item.id === target.uid)!
       if (payload.status === 'active') requireValue((person.role !== 'child' || person.guardianConsent) && (person.role !== 'volunteer' || person.volunteerApproved), '请先完成监护授权或志愿者审核')
       target.status = payload.status as 'active' | 'disabled'; target.disabledReason = text(payload.reason, '变更原因', 1000); person.accountStatus = target.status
-      if (target.status === 'disabled') for (const pair of store.state.pairs.filter(item => item.status === 'active' && [item.childId, item.volunteerId].includes(target.uid))) { pair.status = 'paused'; pair.pausedAt = now; pair.pauseReason = '参与账号已停用'; (pair.pauseHistory ??= []).push({ start: now, kind: 'pause', sourceId: pair.id }) }
+      if (target.status === 'disabled') for (const pair of store.state.pairs.filter(item => item.status === 'active' && [item.childId, item.volunteerId].includes(target.uid))) { pair.status = 'paused'; pair.pausedAt = now; pair.pauseReason = '参与账号已停用'; pair.pauseOwnerId = identity.uid; pair.pauseReviewAt = new Date(Date.parse(now) + 7 * 86400000).toISOString(); (pair.pauseHistory ??= []).push({ start: now, kind: 'pause', sourceId: pair.id }) }
     } else throw new ServiceError('INVALID_ACTION', '不支持此项账号操作')
     store.revision++; audit(store, identity.uid, action, typeof payload.id === 'string' ? payload.id : undefined); return accountStatus(store, identity)
   })
@@ -430,12 +427,15 @@ export function authorizeLetterContent(store: Store, identity: Identity, id: str
   requireValue(actor && letter, '信件不存在', 'NOT_FOUND')
   const decision = authorize({ actor, action: 'read-letter', resource: { type: 'letter', id: letter.id }, purpose: 'home-overview', state: store.state, now: store.state.clock })
   requireAllow(decision, '这封信不在你的可读范围内。')
+  let visible: typeof letter
   if (account.role === 'teacher') {
     const capture = letter.createdBy === identity.uid && letter.moderation === 'draft'
-    return capture ? letter : approvedLetterProjection(letter)
-  }
-  if (account.role === 'operator') return letter
-  return letter.authorId === identity.uid ? letter : approvedLetterProjection(letter)
+    visible = capture ? letter : approvedLetterProjection(letter)
+  } else if (account.role === 'operator') visible = letter
+  else visible = letter.authorId === identity.uid ? letter : approvedLetterProjection(letter)
+  const ocrRun = visible.ocrRunId ? store.state.ocrRuns?.find(run => run.id === visible.ocrRunId && run.letterId === visible.id && run.status === 'completed') : undefined
+  if (ocrRun) visible = { ...visible, authorizedOcrRun: { ...ocrRun, manuscriptAssetId: '', sourceSha256: '', error: undefined } }
+  return visible
 }
 
 export async function executeLetterContentRead(repository: Repository, identity: Identity, id: string, now = new Date().toISOString()) {

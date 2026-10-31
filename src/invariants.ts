@@ -1,5 +1,5 @@
 import type { AppState } from './types'
-import { teacherScope } from './policy'
+import { helpReportComplete, teacherScope } from './policy'
 
 export type InvariantRule =
   | 'PAIR_VALIDITY' | 'LETTER_IDENTITY' | 'PAPER_EVENT_ORDER'
@@ -63,10 +63,7 @@ export function checkInvariants(state: AppState): InvariantViolation[] {
 
   for (const helpCase of state.helpCases ?? []) {
     if (helpCase.status === 'resolved' && helpCase.severity === 'high' && helpCase.reportRequired) {
-      const complete = helpCase.reportDecision === 'not-required'
-        ? !!helpCase.reportReason && !!helpCase.reportReviewedBy && helpCase.reportReviewedBy !== helpCase.ownerId && helpCase.reportReviewedBy !== helpCase.schoolOwnerId
-        : !!helpCase.reportedAt && !!helpCase.reportAuthority && !!helpCase.reportReceipt
-      if (!complete) add('CASE_REPORT_COMPLETE', 'high', '高严重度个案已结案，但报告字段不完整。', [helpCase.id])
+      if (!helpReportComplete(helpCase)) add('CASE_REPORT_COMPLETE', 'high', '高严重度个案已结案，但报告字段不完整。', [helpCase.id])
     }
   }
 
@@ -80,6 +77,7 @@ export function checkInvariants(state: AppState): InvariantViolation[] {
   for (const grant of state.accessGrants ?? []) {
     if (grant.revokedAt) continue
     if (!grant.emergency && !grant.approvedBy) add('GRANT_LIFECYCLE', 'medium', '授权缺少第二签名却仍在生效。', [grant.id])
+    if (!grant.emergency && ['letter', 'attachment', 'help-case'].includes(grant.targetType) && !grant.caseId) add('GRANT_LIFECYCLE', 'high', '敏感访问授权没有关联保护个案。', [grant.id])
     if (!grant.emergency && Date.parse(grant.expiresAt) <= Date.parse(now)) add('GRANT_LIFECYCLE', 'medium', '授权已过期但仍未撤销。', [grant.id])
   }
   for (const grant of state.accessGrants ?? []) {

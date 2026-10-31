@@ -17,8 +17,8 @@ export function PasswordField({ label = '密码', name = 'password', value, onCh
   </div></div>
 }
 
-// Historical account routes remain informational in V2. Only an explicitly
-// configured and access-protected V3 Preview exposes the adult test sign-in.
+// Browser-local demo identities start from the role cards. The configured V3
+// Preview keeps the adult synthetic account and password sign-in.
 export function AuthPage({ kind = 'login', notify }: { kind?: 'login' | 'register' | 'recover' | 'activate'; notify?: (message: string) => void }) {
   const { role: requestedRole } = useParams()
   const navigate = useNavigate()

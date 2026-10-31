@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { createHashRouter, Link, Navigate, NavLink, Route, RouterProvider, Routes, ScrollRestoration, useBlocker, useLocation, useNavigate } from 'react-router'
-import { ArrowRight, BookOpen, CheckCircle2, Feather, HeartHandshake, Leaf, Mail, RotateCcw, Settings2, UserRound, Users, X } from 'lucide-react'
+import { ArrowRight, BookOpen, CheckCircle2, Feather, HeartHandshake, Leaf, Mail, RotateCcw, Scale, Settings2, UserRound, Users, X } from 'lucide-react'
 import { dispatch, formatDate, initialize, resetDemo, useAppData } from './data'
 import { Avatar, ContextLink, Empty, useAction } from './ui'
 import { RoleEntry, roleNames } from './pages/Entry'
@@ -292,7 +292,7 @@ const roleNavigation: Record<Role, NavItem[]> = {
   child: [{ to: '/space', label: '信箱', icon: Mail }, { to: '/write', label: '写信', icon: Feather }, { to: '/account', label: '我的', icon: UserRound }],
   volunteer: [{ to: '/space', label: '陪伴任务', icon: HeartHandshake }, { to: '/write', label: '写信', icon: Feather }, { to: '/correspondence', label: '书信往来', icon: Mail }],
   teacher: [{ to: '/space', label: '收发任务', icon: Mail }, { to: '/teacher/history', label: '处理记录', icon: BookOpen }, { to: '/account', label: '我的', icon: UserRound }],
-  operator: [{ to: '/space', label: '待处理', icon: HeartHandshake }, { to: '/operator/review', label: '审核', icon: Mail }, { to: '/operator/pairs', label: '结对', icon: Users }, { to: '/operator/followups', label: '跟进', icon: BookOpen }, { to: '/operator/safeguarding', label: '保护', icon: CheckCircle2 }, { to: '/operator/system-check', label: '自检', icon: Settings2 }],
+  operator: [{ to: '/space', label: '待处理', icon: HeartHandshake }, { to: '/operator/review', label: '审核', icon: Mail }, { to: '/operator/pairs', label: '结对', icon: Users }, { to: '/operator/followups', label: '跟进', icon: BookOpen }, { to: '/operator/safeguarding', label: '保护', icon: CheckCircle2 }, { to: '/operator/disputes', label: '争议', icon: Scale }, { to: '/operator/system-check', label: '自检', icon: Settings2 }],
 }
 function navActive(pathname: string, role: Role, to: string) {
   if (to === '/space') return pathname === '/space' || role === 'child' && (pathname === '/correspondence' || pathname.startsWith('/letters/')) || role === 'teacher' && pathname.startsWith('/teacher/tasks/')

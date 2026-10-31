@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { createInterface } from 'node:readline/promises'
+import { createInterface } from 'node:readline'
 import { stdin as input, stdout as output } from 'node:process'
 import { resolve } from 'node:path'
 import { hashPassword } from 'better-auth/crypto'
@@ -15,9 +15,10 @@ const roles = [
 const permissionsFor = item => item.key === 'operator' ? ['accounts', 'moderate', 'followup', 'help', 'privacy'] : item.key === 'independent-operator' ? ['help', 'help-independent'] : []
 const escapeSql = value => `'${String(value).replaceAll("'", "''")}'`
 const rl = createInterface({ input, output })
+const question = prompt => new Promise(resolveQuestion => rl.question(prompt, resolveQuestion))
 const ask = async (label, fallback = '') => {
   const suffix = fallback ? `（默认：${fallback}）` : ''
-  const value = (await rl.question(`${label}${suffix}：`)).trim()
+  const value = (await question(`${label}${suffix}：`)).trim()
   return value || fallback
 }
 const askSecret = async label => {
@@ -28,7 +29,7 @@ const askSecret = async label => {
   lineReader._writeToOutput = chunk => {
     if (chunk === prompt || chunk === '\r\n' || chunk === '\n') originalWrite(chunk)
   }
-  try { return await rl.question(prompt) }
+  try { return await question(prompt) }
   finally { lineReader._writeToOutput = originalWrite; output.write('\n') }
 }
 

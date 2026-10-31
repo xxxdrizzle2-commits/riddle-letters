@@ -12,7 +12,7 @@ import { BackLink, Badge, ContextLink, Empty, LetterBadge, LetterPaper, Notice, 
 import { cloudConfigured, cloudHelpCase, cloudLetter } from '../services/cloud'
 import { detectContentSafetySignals } from '../safety-signals'
 import { checkInvariants } from '../invariants'
-import { hasSchoolSeat } from '../policy'
+import { hasSchoolSeat, teacherScope } from '../policy'
 import './Operations.css'
 
 type Props = { state: AppState; actor: Person; notify: (message: string) => void; setDirty?: (dirty: boolean) => void; registerSaveDraft?: (save?:()=>Promise<boolean>)=>void; mode?: 'demo' | 'live' }
@@ -23,11 +23,8 @@ const roleLabels: Record<Role,string> = { child: '小朋友', volunteer: '志愿
 const roleEntryPath = (role: Role, mode: 'demo' | 'live') => mode === 'demo' ? `/demo/start/${role}` : `/login/${role}`
 const roleEntryAction = (role: Role, mode: 'demo' | 'live') => mode === 'demo' ? `切换到${roleLabels[role]}演示身份继续` : `请${roleLabels[role]}成人测试者登录继续`
 const letterRoute = (state: AppState, letter: Letter) => letter.deliveryRoute || (state.pairs.find(pair => pair.id === letter.pairId)?.childId === letter.authorId ? 'online' : state.pairs.find(pair => pair.id === letter.pairId)?.channel === 'paper' ? 'school-paper' : 'online')
-const activeAssignment = (state: AppState, teacherId: string, childId: string, schoolId: string | undefined, scope: 'status' | 'capture' | 'paper-delivery') => (state.teacherAssignments ?? []).some(item => item.teacherId === teacherId && (!item.childId || item.childId === childId) && item.schoolId === schoolId && item.scope.includes(scope) && item.startsAt <= state.clock && (!item.endsAt || item.endsAt > state.clock) && !item.revokedAt)
 function teacherPairs(state: AppState, actor: Person, scope: 'status' | 'capture' | 'paper-delivery') {
-  return state.pairs.filter(pair => pair.status !== 'ended' && ((state.teacherAssignments?.length ?? 0) > 0
-    ? activeAssignment(state, actor.id, pair.childId, pair.schoolId, scope)
-    : pair.teacherId === actor.id))
+  return state.pairs.filter(pair => pair.status !== 'ended' && teacherScope(state, actor.id, pair.childId, scope, state.clock))
 }
 
 function useFocusedDetail(key: string) {
@@ -60,7 +57,7 @@ function LetterTimeline({ state, letter }: { state: AppState; letter: Letter }) 
   const review = state.reviews.filter(item => item.letterId === letter.id)
   return <ol className="letter-timeline" aria-label="信件进度">
     <li><span>信件写成</span><time>{formatDate(letter.createdAt)}</time></li>
-    {review.map(item => <li key={item.id}><span>{item.decision === 'approved' ? '审核通过' : '退回修改'}{item.note && ` · ${item.note}`}</span><time>{formatDate(item.createdAt)}</time></li>)}
+    {review.map(item => <li key={item.id}><span>{item.decision === 'approved' ? '审核通过' : '退回修改'}</span><time>{formatDate(item.createdAt)}</time></li>)}
     {delivery?.printedAt && <li><span>已记录打印</span><time>{formatDate(delivery.printedAt)}</time></li>}
     {delivery?.deliveredAt && <li><span>{letterRoute(state, letter) === 'school-paper' ? '已实际交给孩子' : '已在线送达'}</span><time>{formatDate(delivery.deliveredAt)}</time></li>}
     {delivery?.readAt && <li><span>已打开阅读</span><time>{formatDate(delivery.readAt)}</time></li>}
@@ -161,7 +158,7 @@ function TeacherStageWorkspace({ state, actor, notify, setDirty, registerSaveDra
   const queues = teacherQueues(state, actor)
   const current = queues[tab]
   const detail = current.find(letter => letter.id === detailId)
-  const detailContent = detail && (mode === 'live' ? authorizedLetters[detail.id] : detail)
+  const detailContent = detail && state.pairs.find(pair => pair.id === detail.pairId)?.status === 'active' && (mode === 'live' ? authorizedLetters[detail.id] : detail)
   const detailReplyTask = detail && tab === 'reply' ? state.tasks.find(item => item.letterId === detail.id) : undefined
   const completedLetter = !detail && detailId ? state.letters.find(letter => letter.id === detailId && pairs.some(pair => pair.id === letter.pairId)) : undefined
   const completedDelivery = state.deliveries.find(item => item.letterId === completedLetter?.id)
@@ -220,14 +217,14 @@ function TeacherStageWorkspace({ state, actor, notify, setDirty, registerSaveDra
   }
   async function stopSchoolDelivery(pair: Pair) {
     if (stopReason.trim().length < 2) return
-    const ok = await run(() => dispatch(actor.id, { type: 'pause-pair', id: pair.id, reason: stopReason.trim() }), '本校交付已立即停止，平台已收到保护性暂停状态；恢复须由平台复核。')
+    const ok = await run(() => dispatch(actor.id, { type: 'pause-pair', id: pair.id, reason: stopReason.trim() }), '本校交付已立即停止，并已建立受限保护个案与双签名争议；恢复须经学校和平台分别确认。')
     if (ok) { setStopOpen(false); setStopReason('') }
   }
   if (actor.role !== 'teacher') return <Empty title="这项任务需要老师身份" />
 
   return <div className="stack operations-page">
     <BackLink fallbackTo={detailId ? `/teacher/tasks/${tab}` : '/space'} fallbackLabel={detailId ? `返回${teacherStages.find(item => item.key === tab)?.label}列表` : '返回收发任务'} />
-    <PageHeader eyebrow="老师收发任务" title={detail ? detail.title : teacherStages.find(item => item.key === tab)?.label ?? '收发任务'} description={detail ? `${nameOf(state, detail.authorId)}写给${nameOf(state, recipientForLetter(state, detail))}。请先核对，再记录这一站。` : teacherStages.find(item => item.key === tab)?.description ?? ''} />
+    <PageHeader eyebrow="老师收发任务" title={detail ? '这封信的收发任务' : teacherStages.find(item => item.key === tab)?.label ?? '收发任务'} description={detail ? `${nameOf(state, detail.authorId)}写给${nameOf(state, recipientForLetter(state, detail))}。请先核对，再记录这一站。` : teacherStages.find(item => item.key === tab)?.description ?? ''} />
     {searchParams.get('result') === 'print' && <WorkflowOutcome title={`已记录 ${searchParams.get('count') || '1'} 封信打印`} status="这些信件现在处于待交付状态；打印不等于已经交到收件人手里。" next="老师在实际交付后确认；送达时间才会启动收件人的回应期限。" to={`/teacher/tasks/deliver${searchParams.get('last') ? `?letter=${encodeURIComponent(searchParams.get('last')!)}` : ''}`} actionLabel="去待交付" />}
     {searchParams.get('result') === 'deliver' && <WorkflowOutcome title={`已确认 ${searchParams.get('count') || '1'} 封信实际交付`} status={deliveryStatus} next={deliveryNext} to={resultRecipient === 'mixed' ? undefined : roleEntryPath(resultRecipient, mode)} actionLabel={resultRecipient === 'mixed' ? undefined : roleEntryAction(resultRecipient, mode)} />}
     {searchParams.get('result') === 'deliver' && resultRecipient === 'child' && searchParams.get('last') && <p className="workflow-next-owner">老师之后需要协助回信时：<Link className="text-button" to={`/teacher/tasks/reply?letter=${encodeURIComponent(searchParams.get('last')!)}`}>查看待回传<ArrowRight size={16} aria-hidden="true" /></Link></p>}
@@ -242,14 +239,14 @@ function TeacherStageWorkspace({ state, actor, notify, setDirty, registerSaveDra
         {tab !== 'reply' && current.length > 0 && <label className="checkbox-row"><input type="checkbox" checked={selectable.length > 0 && selectedIds.length === selectable.length} onChange={event => changeSelection(event.target.checked ? selectable.map(letter => letter.id) : [])} disabled={selectable.length === 0} />全选可处理的信件</label>}
         {current.length === 0 && <Empty title="这一步暂时没有待办" description={tab === 'print' ? '审核通过的纸质信件会出现在这里。' : tab === 'deliver' ? '记录已打印后，就可以在这里确认交付。' : '交给孩子的来信会进入这里，等待孩子回信。'} />}
         <div className="stack compact">{current.map(letter => { const pair = pairs.find(item => item.id === letter.pairId)!; const task = state.tasks.find(item => item.letterId === letter.id); return <div key={letter.id} className="operation-letter-row">
-          {tab !== 'reply' && <input type="checkbox" aria-label={`选择${letter.title}`} checked={selectedIds.includes(letter.id)} disabled={pair.status === 'paused' || busy} onChange={event => changeSelection(event.target.checked ? [...selectedIds, letter.id] : selectedIds.filter(id => id !== letter.id))} />}
-          <button id={focusDetail(letter.id)} className="letter-select" type="button" onClick={() => openLetter(letter.id)}><strong>{letter.title}</strong><span>{nameOf(state, letter.authorId)} → {nameOf(state, recipientForLetter(state, letter))}</span><span className="letter-row-meta">{pair.status === 'paused' ? '陪伴已暂停' : task && tab === 'reply' ? `回应期限 ${formatDate(task.dueAt)}` : '审核已通过'}{task?.status === 'review' ? ' · 回信审核中' : task && isOverdue(state, task) ? ' · 已逾期，运营将跟进' : ''}</span></button>
+          {tab !== 'reply' && <input type="checkbox" aria-label={`选择${nameOf(state, recipientForLetter(state, letter))}的纸质来信`} checked={selectedIds.includes(letter.id)} disabled={pair.status === 'paused' || busy} onChange={event => changeSelection(event.target.checked ? [...selectedIds, letter.id] : selectedIds.filter(id => id !== letter.id))} />}
+          <button id={focusDetail(letter.id)} className="letter-select" type="button" onClick={() => openLetter(letter.id)}><strong>纸质来信</strong><span>{nameOf(state, letter.authorId)} → {nameOf(state, recipientForLetter(state, letter))}</span><span className="letter-row-meta">{pair.status === 'paused' ? '陪伴已暂停' : task && tab === 'reply' ? `回应期限 ${formatDate(task.dueAt)}` : '审核已通过'}{task?.status === 'review' ? ' · 回信审核中' : task && isOverdue(state, task) ? ' · 已逾期，运营将跟进' : ''}</span></button>
         </div> })}</div>
       </section>}
       {detail && detailPair && <div className="stack teacher-detail">
         {detailReplyTask && <Notice>孩子的回应期限：{formatDate(detailReplyTask.dueAt)}。老师协助收回纸质回信，提交前请让孩子核对内容。</Notice>}
         <section className="panel stack"><div className="section-title"><h2>{tab === 'print' ? '本次获准打印版' : '这封信的任务信息'}</h2><Badge>{letterRoute(state, detail) === 'school-paper' ? '学校纸质交付' : '线上投递'}</Badge></div>
-          {tab === 'print' ? detailContent ? <LetterPaper state={state} letter={detailContent} /> : <p role="status" className="muted">正在按本次打印任务取得获准版本…</p> : <Notice>这里仅显示完成当前任务所需的状态。老师不会因此获得历史信件全文检索权限。</Notice>}
+          {tab === 'print' ? detailContent ? <LetterPaper state={state} letter={detailContent} /> : <p role="status" className="muted">{detailPair.status === 'active' ? '正在按本次打印任务取得获准版本…' : '交付已暂停，当前不能读取打印版。'}</p> : <Notice>这里仅显示完成当前任务所需的状态。老师不会因此获得历史信件全文检索权限。</Notice>}
           {contentError && <Notice tone="error">{contentError}</Notice>}
           <LetterTimeline state={state} letter={detail} />
         </section>
@@ -275,7 +272,7 @@ function TeacherStageWorkspace({ state, actor, notify, setDirty, registerSaveDra
 }
 
 function TeacherAssignmentPanel({ state, actor, notify }: Props) {
-  const coordinateAssignments = (state.teacherAssignments ?? []).filter(item => item.teacherId === actor.id && item.scope.includes('school-coordinate') && item.startsAt <= state.clock && (!item.endsAt || item.endsAt > state.clock) && !item.revokedAt)
+  const coordinateAssignments = (state.teacherAssignments ?? []).filter(item => item.teacherId === actor.id && item.scope.includes('school-coordinate') && Date.parse(item.startsAt) <= Date.parse(state.clock) && (!item.endsAt || Date.parse(state.clock) < Date.parse(item.endsAt)) && !item.revokedAt && (!state.schools?.length || state.schools.some(school => school.id === item.schoolId && school.status === 'active')))
   const schoolIds = new Set(coordinateAssignments.map(item => item.schoolId))
   const children = state.people.filter(person => person.role === 'child' && person.schoolId && schoolIds.has(person.schoolId))
   const teachers = state.people.filter(person => person.role === 'teacher' && person.id !== actor.id && person.accountStatus !== 'disabled' && (!person.schoolId || schoolIds.has(person.schoolId)))
@@ -316,6 +313,7 @@ export function TeacherPage({ state, actor, notify, mode }: Props) {
     : undefined
   const supportTasks = (state.supportTasks ?? []).filter(task => task.ownerTeacherId === actor.id && task.status === 'open')
   const protectionCases = (state.helpCases ?? []).filter(item => item.schoolOwnerId === actor.id && item.status !== 'resolved')
+  const submittedCases = (state.helpCases ?? []).filter(item => item.requesterId === actor.id).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
   const { run: runGuard, busy: guardBusy, error: guardError } = useAction(notify)
   const [supportNote, setSupportNote] = useState<Record<string, string>>({})
   const [reportPairId, setReportPairId] = useState('')
@@ -348,6 +346,7 @@ export function TeacherPage({ state, actor, notify, mode }: Props) {
       <div className="section-title"><h2>保护与异常</h2><Badge tone={protectionCases.length ? 'warning' : undefined}>{protectionCases.length ? `${protectionCases.length} 件由保护负责人跟进` : '暂无待处理个案'}</Badge></div>
       {supportTasks.length > 0 && <div className="stack compact">{supportTasks.map(task => <article className="panel stack" key={task.id}><div><strong>联系孩子，确认近况与需要的支持</strong><small className="muted"> · {nameOf(state, task.childId)} · {formatDate(task.dueAt)} 前</small></div><div className="field"><label htmlFor={`support-${task.id}`}>已完成的支持动作</label><input id={`support-${task.id}`} value={supportNote[task.id] ?? ''} onChange={event => setSupportNote(old => ({ ...old, [task.id]: event.target.value }))} placeholder="例如：已联系孩子，本周状态平稳" /></div><button className="btn secondary small" type="button" disabled={guardBusy || (supportNote[task.id] ?? '').trim().length < 3} onClick={() => void completeSupportTask(task.id)}>记录已完成</button></article>)}</div>}
       {protectionCases.length > 0 && <div className="stack compact">{protectionCases.map(item => <div className="operation-letter-row" key={item.id}><span><strong>保护个案 · {item.severity === 'high' ? '高严重度' : '一般'}</strong><small className="muted">{formatDate(item.createdAt)} · {item.status === 'open' ? '尚待接手' : '处理中'}</small></span><span className="letter-row-meta">正文只在保护流程中逐次授权读取</span></div>)}</div>}
+      {submittedCases.length > 0 && <details className="letter-options"><summary>查看我提交的异常进度（{submittedCases.length}）</summary><div className="stack compact">{submittedCases.map(item => <div className="operation-letter-row" key={`submitted-${item.id}`}><span><strong>异常记录 · {item.status === 'resolved' ? '已处理' : item.status === 'claimed' ? '处理中' : '等待接手'}</strong><small className="muted">提交于 {formatDate(item.createdAt)} · 更新于 {formatDate(item.updatedAt)}</small></span><span className="letter-row-meta">{item.status === 'resolved' ? '处理流程已关闭' : '受限保护流程处理中'}</span></div>)}</div></details>}
       {statusPairs.length > 0 && (reportDone ? <Notice>异常已保存到受限保护队列，等待独立保护负责人接手。这不表示已上报学校或外部机构。</Notice> : <details className="letter-options" open><summary>上报当次收发异常</summary><div className="stack"><div className="field"><label htmlFor="report-pair">涉及哪组结对</label><select id="report-pair" value={reportPairId} onChange={event => setReportPairId(event.target.value)}><option value="">请选择</option>{statusPairs.map(pair => <option key={pair.id} value={pair.id}>{nameOf(state, pair.childId)} ↔ {nameOf(state, pair.volunteerId)}</option>)}</select></div><div className="field"><label htmlFor="report-body">发生了什么（不写孩子的隐私细节）</label><textarea id="report-body" rows={3} value={reportBody} onChange={event => setReportBody(event.target.value)} /></div><button className="btn secondary" type="button" disabled={guardBusy || !reportPairId || reportBody.trim().length < 2} onClick={() => void reportAbnormal()}>保存异常记录</button>{guardError && <p className="field-error" role="alert">{guardError}</p>}</div></details>)}
     </section>
     {canSignDispute && schoolDisputes.length > 0 && <section className="stack" aria-label="学校侧争议签名">
@@ -361,7 +360,7 @@ export function TeacherPage({ state, actor, notify, mode }: Props) {
       {guardError && <p className="field-error" role="alert">{guardError}</p>}
     </section>}
     {next ? <section className="operations-next panel stack" aria-label="现在最需要处理的任务">
-      <p className="eyebrow">现在最需要处理</p><h2>{next.label}</h2><p><strong>{next.letter.title}</strong> · {nameOf(state, next.letter.authorId)}写给{nameOf(state, recipientForLetter(state, next.letter))}</p><p className="muted">{next.description}</p>
+      <p className="eyebrow">现在最需要处理</p><h2>{next.label}</h2><p><strong>纸质来信</strong> · {nameOf(state, next.letter.authorId)}写给{nameOf(state, recipientForLetter(state, next.letter))}</p><p className="muted">{next.description}</p>
       <ContextLink className="btn" to={`/teacher/tasks/${next.stage}?letter=${encodeURIComponent(next.letter.id)}`} returnTo={`/teacher/tasks/${next.stage}`} returnLabel={`返回${teacherStages.find(item => item.key === next.stage)?.label}列表`} historyBack={false}>查看并处理这封信<ArrowRight size={17} aria-hidden="true" /></ContextLink>
     </section> : <section className="panel stack"><h2>今天没有需要立即处理的信</h2><p className="muted">审核通过的纸质信会出现在待打印列表。也可以查看以往的收发记录。</p><Link className="btn secondary" to="/teacher/history">查看处理记录</Link></section>}
     <section className="stack" aria-label="负责孩子与独立结对">
@@ -394,14 +393,14 @@ export function TeacherHistoryPage({ state, actor }: Props) {
   const location = useLocation()
   useFocusedDetail(searchParams.get('letter') ?? '')
   if (actor.role !== 'teacher') return <Empty title="这项任务需要老师身份" />
-  const pairIds = new Set(state.pairs.filter(pair => pair.teacherId === actor.id && pair.channel === 'paper').map(pair => pair.id))
-  const letters = state.letters.filter(letter => pairIds.has(letter.pairId) && letter.moderation === 'approved').sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+  const pairIds = new Set(teacherPairs(state, actor, 'status').map(pair => pair.id))
+  const letters = state.letters.filter(letter => pairIds.has(letter.pairId) && letterRoute(state, letter) === 'school-paper' && letter.moderation === 'approved').sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
   const detail = letters.find(letter => letter.id === searchParams.get('letter'))
   return <div className="stack operations-page">
     <BackLink fallbackTo={detail ? '/teacher/history' : '/space'} fallbackLabel={detail ? '返回处理记录' : '返回收发任务'} />
-    <PageHeader eyebrow="老师处理记录" title={detail ? detail.title : '每一步，都有记录。'} description={detail ? '这里分别记录审核、打印、交付与阅读。' : '已打印不等于已交付；信件仍需由老师确认实际交给收件人。'} />
-    {detail ? <section className="panel stack"><p>{nameOf(state, detail.authorId)} → {nameOf(state, recipientForLetter(state, detail))}</p><LetterPaper state={state} letter={detail} /><LetterTimeline state={state} letter={detail} /></section>
-      : <section className="panel stack task-list" aria-label="历史信件列表">{letters.length ? letters.map(letter => { const delivery = state.deliveries.find(item => item.letterId === letter.id); return <button id={`teacher-history-${letter.id}`} className="operation-letter-row letter-select" type="button" key={letter.id} onClick={() => setSearchParams({ letter: letter.id }, { state: { returnContext: { to: '/teacher/history', label: '返回处理记录', sourcePath: `${location.pathname}${location.search}`, sourceKey: location.key, focusId: `teacher-history-${letter.id}`, historyBack: true } } })}><strong>{letter.title}</strong><span>{nameOf(state, letter.authorId)} → {nameOf(state, recipientForLetter(state, letter))}</span><span className="letter-row-meta">{delivery?.deliveredAt ? '已交付' : delivery?.printedAt ? '已打印，待交付' : '待打印'} · {formatDate(letter.updatedAt)}</span></button> }) : <Empty title="还没有纸质书信记录" description="审核通过的纸质信件会按收发进度记录在这里。" />}</section>}
+    <PageHeader eyebrow="老师处理记录" title={detail ? '这封信的收发记录' : '每一步，都有记录。'} description={detail ? '这里分别记录审核、打印、交付与阅读。' : '已打印不等于已交付；信件仍需由老师确认实际交给收件人。'} />
+    {detail ? <section className="panel stack"><p>{nameOf(state, detail.authorId)} → {nameOf(state, recipientForLetter(state, detail))} · 记录编号 {detail.id}</p><LetterTimeline state={state} letter={detail} /></section>
+      : <section className="panel stack task-list" aria-label="历史信件列表">{letters.length ? letters.map(letter => { const delivery = state.deliveries.find(item => item.letterId === letter.id); return <button id={`teacher-history-${letter.id}`} className="operation-letter-row letter-select" type="button" key={letter.id} onClick={() => setSearchParams({ letter: letter.id }, { state: { returnContext: { to: '/teacher/history', label: '返回处理记录', sourcePath: `${location.pathname}${location.search}`, sourceKey: location.key, focusId: `teacher-history-${letter.id}`, historyBack: true } } })}><strong>纸质来信 · {formatDate(letter.createdAt)}</strong><span>{nameOf(state, letter.authorId)} → {nameOf(state, recipientForLetter(state, letter))} · 编号 {letter.id}</span><span className="letter-row-meta">{delivery?.deliveredAt ? '已交付' : delivery?.printedAt ? '已打印，待交付' : '待打印'} · {formatDate(letter.updatedAt)}</span></button> }) : <Empty title="还没有纸质书信记录" description="审核通过的纸质信件会按收发进度记录在这里。" />}</section>}
   </div>
 }
 
@@ -484,9 +483,8 @@ function Matching({ state, actor, notify, mode = 'demo' }: Props) {
   const currentChild = children.some(person => person.id === childId) ? childId : children[0]?.id ?? ''
   const volunteers = allVolunteers.filter(person => !state.pairs.some(pair => pair.status !== 'ended' && pair.childId === currentChild && pair.volunteerId === person.id))
   const currentVolunteer = volunteers.some(person => person.id === volunteerId) ? volunteerId : volunteers[0]?.id ?? ''
-  const childSchoolId = state.people.find(person => person.id === currentChild)?.schoolId
   const eligibleTeachers = mode === 'live' && (state.teacherAssignments?.length ?? 0) > 0
-    ? teachers.filter(person => activeAssignment(state, person.id, currentChild, childSchoolId, 'status'))
+    ? teachers.filter(person => teacherScope(state, person.id, currentChild, 'status', state.clock))
     : mode === 'live' && state.people.find(person => person.id === currentChild)?.teacherId
       ? teachers.filter(person => person.id === state.people.find(child => child.id === currentChild)?.teacherId)
       : teachers
@@ -527,6 +525,11 @@ function HelpCaseQueue({ state, actor, notify, mode = 'demo' }: Props) {
   const [validation, setValidation] = useState('')
   const [pauseAllConfirm, setPauseAllConfirm] = useState(false)
   const [pauseAllReason, setPauseAllReason] = useState('')
+  const [triageSeverity, setTriageSeverity] = useState<'low' | 'medium' | 'high'>('medium')
+  const [triageReportRequired, setTriageReportRequired] = useState(false)
+  const [triageNote, setTriageNote] = useState('')
+  const [reportAuthority, setReportAuthority] = useState('')
+  const [reportReceipt, setReportReceipt] = useState('')
   const { run, busy, error } = useAction(notify)
   useFocusedDetail(selectedId)
   const visible = (state.helpCases ?? []).filter(item => !item.excludedActorIds.includes(actor.id) && (item.ownerId === actor.id || item.backupOwnerId === actor.id))
@@ -535,7 +538,7 @@ function HelpCaseQueue({ state, actor, notify, mode = 'demo' }: Props) {
   const selected = selectedMetadata && (mode === 'live' ? authorizedCases[selectedMetadata.id] : selectedMetadata)
   const queuePath = `/operator/followups?kind=help${filter === 'resolved' ? '&status=resolved' : ''}`
   const owners = state.people.filter(person => person.role === 'operator' && person.accountStatus !== 'disabled' && hasPermission(person, 'safeguarding') && selectedMetadata && person.id !== selectedMetadata.reportedPersonId && !selectedMetadata.excludedActorIds.includes(person.id))
-  useEffect(() => { setOwnerId(selectedMetadata?.ownerId ?? ''); setResolution(''); setValidation(''); setContentError(''); setPauseAllConfirm(false); setPauseAllReason('') }, [selectedMetadata?.id])
+  useEffect(() => { setOwnerId(selectedMetadata?.ownerId ?? ''); setResolution(''); setValidation(''); setContentError(''); setPauseAllConfirm(false); setPauseAllReason(''); setTriageSeverity(selectedMetadata?.severity ?? 'medium'); setTriageReportRequired(!!selectedMetadata?.reportRequired); setTriageNote(''); setReportAuthority(''); setReportReceipt('') }, [selectedMetadata?.id])
   useEffect(() => {
     if (mode !== 'live' || !selectedMetadata || authorizedCases[selectedMetadata.id]) return
     let cancelled = false
@@ -555,6 +558,15 @@ function HelpCaseQueue({ state, actor, notify, mode = 'demo' }: Props) {
     const ok = await run(() => dispatch(actor.id, { type: 'resolve-help-case', id: selectedMetadata.id, note: resolution.trim() }), '处理记录已保存；关闭站内个案不替代依法报告或后续支持。')
     if (ok) setSearchParams({ kind: 'help', status: 'resolved', item: selectedMetadata.id }, { replace: true })
   }
+  async function triage() {
+    if (!selectedMetadata || triageNote.trim().length < 3) { setValidation('请至少写 3 个字，记录分诊依据。'); return }
+    const required = triageSeverity === 'high' ? true : triageReportRequired
+    await run(() => dispatch(actor.id, { type: 'triage-help-case', id: selectedMetadata.id, severity: triageSeverity, reportRequired: required, note: triageNote.trim() }), '严重度、处理时限和报告要求已记录。')
+  }
+  async function recordReport() {
+    if (!selectedMetadata || !reportAuthority.trim() || !reportReceipt.trim()) { setValidation('请填写报告机关和回执编号。'); return }
+    await run(() => dispatch(actor.id, { type: 'update-help-report', id: selectedMetadata.id, reportDecision: 'reported', reportAuthority: reportAuthority.trim(), reportReceipt: reportReceipt.trim() }), '外部报告机关与回执已记录。')
+  }
   async function pauseAllVolunteerPairs(selected: HelpCase) {
     if (!selected.reportedPersonId || pauseAllReason.trim().length < 4) { setValidation('请至少写 4 个字，说明为何需要保护性暂停全部结对。'); return }
     const ok = await run(() => dispatch(actor.id, { type: 'pause-volunteer', volunteerId: selected.reportedPersonId!, reason: pauseAllReason.trim() }), '平台已保护性暂停该志愿者的全部活跃结对和后续投递；这不表示个案已经查实。')
@@ -567,6 +579,14 @@ function HelpCaseQueue({ state, actor, notify, mode = 'demo' }: Props) {
       {!selectedMetadata && <section className="panel stack task-list"><h2>{filter === 'open' ? '分派给我的保护个案' : '我处理过的保护个案'}</h2><p className="muted small-text">列表只显示接手状态和必要摘要；求助全文在点开具体个案后逐次授权读取。</p>{!items.length && <Empty title={filter === 'open' ? '当前没有分派给你的保护个案' : '还没有已处理记录'} description="无人接手不等于安全，值守与外部升级由预设负责人另行保障。" />}<div className="stack compact">{items.map(item => <button id={`operator-help-case-${item.id}`} key={item.id} type="button" className="operation-letter-row letter-select" onClick={() => setSearchParams({ kind: 'help', ...(filter === 'resolved' ? { status: 'resolved' } : {}), item: item.id }, { state: { returnContext: { to: queuePath, label: '返回保护个案', sourcePath: `${location.pathname}${location.search}`, sourceKey: location.key, focusId: `operator-help-case-${item.id}`, historyBack: true } } })}><strong>受限保护个案</strong><span>涉及：{item.reportedParty === 'volunteer' ? '志愿者' : item.reportedParty === 'teacher' ? '老师' : item.reportedParty === 'operator' ? '运营人员' : '其他／未说明'}</span><span className="letter-row-meta">{formatDate(item.createdAt)} · {item.status === 'open' ? '尚待接手' : item.status === 'claimed' ? '处理中' : '已处理'}</span></button>)}</div></section>}
       {selectedMetadata && !selected && <section className="panel stack" aria-live="polite"><h2>正在取得受限个案内容</h2><p className="muted">普通任务快照不含求助全文；本次读取会校验回避关系并记录审计。</p>{contentError && <Notice tone="error">{contentError}</Notice>}</section>}
       {selected && <section className="panel stack"><div className="section-title"><h2>保护个案</h2><Badge tone="warning">{selected.status === 'open' ? '尚待接手' : selected.status === 'claimed' ? '处理中' : '已处理'}</Badge></div><p className="muted small-text">涉及对象：{selected.reportedParty === 'volunteer' ? '志愿者' : selected.reportedParty === 'teacher' ? '老师' : selected.reportedParty === 'operator' ? '运营人员' : '其他／不方便说'}{selected.reportedPersonId ? ` · ${nameOf(state, selected.reportedPersonId)}` : ' · 未要求孩子知道姓名'}</p><div className="followup-note preserve-lines">{selected.body}</div><Notice>先安排孩子安全与支持，避免反复询问。被反映者和回避名单中的人员不能读取、转派或关闭；疑似侵害或危险不得等待平台内部查实后才报告。</Notice>{selected.status === 'open' && <button className="btn secondary" type="button" disabled={busy} onClick={() => void claim()}>记录我已接手</button>}{selected.status !== 'resolved' && selected.reportedParty === 'volunteer' && selected.reportedPersonId && (pauseAllConfirm ? <section className="pre-submit-check stack" aria-label="暂停全部结对确认"><h3>保护性暂停该志愿者全部结对</h3><p>这会立即阻断平台侧全部活跃结对和后续投递，不等待个案查实。操作结果必须写成“保护性暂停”，不能当作事实认定。</p><div className="field"><label htmlFor="pause-all-reason">暂停依据</label><input id="pause-all-reason" value={pauseAllReason} onChange={event => { setPauseAllReason(event.target.value); setValidation('') }} placeholder="例如：出现可信的跨结对站外联系诱导" /></div><div className="toolbar"><button className="btn" type="button" disabled={busy || pauseAllReason.trim().length < 4} onClick={() => void pauseAllVolunteerPairs(selected)}>确认暂停全部结对</button><button className="btn secondary" type="button" disabled={busy} onClick={() => { setPauseAllConfirm(false); setPauseAllReason('') }}>取消</button></div></section> : <button className="btn secondary" type="button" disabled={busy} onClick={() => setPauseAllConfirm(true)}>保护性暂停该志愿者全部结对</button>)}<div className="inline-operation"><div className="field"><label htmlFor="help-case-owner">转派给未涉事保护处理人</label><select id="help-case-owner" value={ownerId} onChange={event => setOwnerId(event.target.value)}>{owners.map(person => <option key={person.id} value={person.id}>{person.nickname}</option>)}</select></div><button className="btn secondary small" type="button" disabled={busy || !ownerId || ownerId === selected.ownerId} onClick={() => void assign()}>保存转派</button></div>{selected.history.length > 0 && <details className="version-history"><summary>查看个案处理记录（{selected.history.length} 条）</summary>{selected.history.map((entry, index) => <article key={`${entry.at}-${index}`}><p className="muted small-text">{nameOf(state, entry.actorId)} · {formatDate(entry.at)}</p><p className="preserve-lines">{entry.note}</p></article>)}</details>}{selected.status !== 'resolved' && <div className="field"><label htmlFor="help-case-resolution">实际行动、外部报告与后续支持</label><textarea id="help-case-resolution" rows={5} value={resolution} onChange={event => { setResolution(event.target.value); setValidation('') }} aria-invalid={!!validation}/>{validation && <p className="field-error" role="alert">{validation}</p>}</div>}{error && <Notice tone="error">{error}</Notice>}{selected.status !== 'resolved' && <button className="btn" type="button" disabled={busy || resolution.trim().length < 4} onClick={() => void resolve()}>保存处理并关闭站内个案</button>}{selected.status === 'resolved' && <div className="pre-submit-check"><h3>处理结果</h3><p className="preserve-lines">{selected.resolution}</p></div>}</section>}
+      {selected && selected.status !== 'resolved' && <section className="panel stack" aria-label="个案分诊与报告记录">
+        <div className="section-title"><h2>分诊与报告记录</h2><Badge tone={selected.severity === 'high' ? 'warning' : undefined}>{selected.triagedAt ? `${selected.severity === 'high' ? '高' : selected.severity === 'low' ? '低' : '中'}严重度` : '待确认分诊'}</Badge></div>
+        <div className="inline-operation"><div className="field"><label htmlFor="help-case-severity">严重度</label><select id="help-case-severity" value={triageSeverity} onChange={event => { const value = event.target.value as 'low' | 'medium' | 'high'; setTriageSeverity(value); if (value === 'high') setTriageReportRequired(true) }}><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></div><label className="checkbox-row"><input type="checkbox" checked={triageReportRequired || triageSeverity === 'high'} disabled={triageSeverity === 'high'} onChange={event => setTriageReportRequired(event.target.checked)} />进入法定报告记录要求</label></div>
+        <div className="field"><label htmlFor="help-case-triage-note">分诊依据</label><input id="help-case-triage-note" value={triageNote} onChange={event => setTriageNote(event.target.value)} placeholder="记录风险、时限和需要立即采取的保护动作" /></div>
+        <button className="btn secondary small" type="button" disabled={busy || triageNote.trim().length < 3} onClick={() => void triage()}>保存分诊</button>
+        {selected.reportRequired && !selected.reportedAt && <div className="pre-submit-check stack"><h3>记录实际外部报告</h3><p>负责人不能把报告要求直接改为“无需报告”。本演示只允许记录已经完成的报告；免报告结论须由未参与处理的隐私复核人另行确认。</p><div className="inline-operation"><div className="field"><label htmlFor="help-report-authority">报告机关</label><input id="help-report-authority" value={reportAuthority} onChange={event => setReportAuthority(event.target.value)} /></div><div className="field"><label htmlFor="help-report-receipt">回执编号</label><input id="help-report-receipt" value={reportReceipt} onChange={event => setReportReceipt(event.target.value)} /></div></div><button className="btn secondary small" type="button" disabled={busy || !reportAuthority.trim() || !reportReceipt.trim()} onClick={() => void recordReport()}>保存报告记录</button></div>}
+        {selected.reportedAt && <Notice>已记录向“{selected.reportAuthority}”报告，回执：{selected.reportReceipt}。</Notice>}
+      </section>}
     </div>
   </div>
 }
