@@ -12,7 +12,7 @@ import { BackLink, Badge, ContextLink, Empty, LetterBadge, LetterPaper, Notice, 
 import { cloudConfigured, cloudHelpCase, cloudLetter } from '../services/cloud'
 import { detectContentSafetySignals } from '../safety-signals'
 import { checkInvariants } from '../invariants'
-import { grantIsActive, hasSchoolSeat, teacherScope } from '../policy'
+import { authorize, grantIsActive, hasSchoolSeat, teacherScope } from '../policy'
 import './Operations.css'
 
 type Props = { state: AppState; actor: Person; notify: (message: string) => void; setDirty?: (dirty: boolean) => void; registerSaveDraft?: (save?:()=>Promise<boolean>)=>void; mode?: 'demo' | 'live' }
@@ -217,7 +217,12 @@ function TeacherStageWorkspace({ state, actor, notify, setDirty, registerSaveDra
   }
   async function stopSchoolDelivery(pair: Pair) {
     if (stopReason.trim().length < 2) return
-    const ok = await run(() => dispatch(actor.id, { type: 'pause-pair', id: pair.id, reason: stopReason.trim() }), '本校交付已立即停止，并已建立受限保护个案与双签名争议；恢复须经学校和平台分别确认。')
+    const ok = await run(async () => {
+      const helpCaseId = await dispatch(actor.id, { type: 'pause-pair', id: pair.id, reason: stopReason.trim() })
+      notify(helpCaseId
+        ? '本校交付已立即停止，并已建立受限保护个案与双签名争议；恢复须经学校和平台分别确认。'
+        : '本校交付已立即停止并记录双签名争议；当前没有合格保护负责人，未自动建案，须按人工升级渠道接续。')
+    })
     if (ok) { setStopOpen(false); setStopReason('') }
   }
   if (actor.role !== 'teacher') return <Empty title="这项任务需要老师身份" />
@@ -312,7 +317,7 @@ export function TeacherPage({ state, actor, notify, mode }: Props) {
     : urgentReply ? { stage: 'reply' as const, letter: urgentReply.letter, label: '留意这封信的回信', description: `回应约定于 ${formatDate(urgentReply.task!.dueAt)} 前完成。` }
     : undefined
   const supportTasks = (state.supportTasks ?? []).filter(task => task.ownerTeacherId === actor.id && task.status === 'open')
-  const protectionCases = (state.helpCases ?? []).filter(item => item.schoolOwnerId === actor.id && item.status !== 'resolved')
+  const protectionCases = (state.helpCases ?? []).filter(item => item.status !== 'resolved' && authorize({ actor, action: 'read-help-case', resource: { type: 'help-case', id: item.id }, purpose: 'safeguarding-case', state, now: state.clock }).decision === 'allow')
   const submittedCases = (state.helpCases ?? []).filter(item => item.requesterId === actor.id).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
   const { run: runGuard, busy: guardBusy, error: guardError } = useAction(notify)
   const [supportNote, setSupportNote] = useState<Record<string, string>>({})
@@ -536,7 +541,7 @@ function HelpCaseQueue({ state, actor, notify, mode = 'demo' }: Props) {
   const grantedCaseIds = new Set((state.accessGrants ?? []).filter(grant => grant.actorId === actor.id && grant.targetType === 'help-case' && ['audit-review', 'data-request'].includes(grant.purpose) && grantIsActive(grant, state.clock)).map(grant => grant.targetId))
   const reportReviewCaseIds = new Set((state.accessGrants ?? []).filter(grant => grant.actorId === actor.id && grant.targetType === 'help-case' && grant.purpose === 'audit-review' && grantIsActive(grant, state.clock)).map(grant => grant.targetId))
   const visible = (state.helpCases ?? []).filter(item => !item.excludedActorIds.includes(actor.id) && (
-    actor.role === 'teacher' ? item.schoolOwnerId === actor.id
+    actor.role === 'teacher' ? authorize({ actor, action: 'read-help-case', resource: { type: 'help-case', id: item.id }, purpose: 'safeguarding-case', state, now: state.clock }).decision === 'allow'
       : actor.role === 'operator' && (hasPermission(actor, 'safeguarding') && (item.ownerId === actor.id || item.backupOwnerId === actor.id)
         || hasPermission(actor, 'privacy') && grantedCaseIds.has(item.id))
   ))
@@ -599,14 +604,14 @@ function HelpCaseQueue({ state, actor, notify, mode = 'demo' }: Props) {
     {!selectedMetadata && <div className="toolbar"><button type="button" className={`btn small ${filter === 'open' ? '' : 'secondary'}`} aria-pressed={filter === 'open'} onClick={() => setSearchParams({ kind: 'help' }, { replace: true })}>待接手 / 处理中</button><button type="button" className={`btn small ${filter === 'resolved' ? '' : 'secondary'}`} aria-pressed={filter === 'resolved'} onClick={() => setSearchParams({ kind: 'help', status: 'resolved' }, { replace: true })}>已处理记录</button></div>}
     <div className="operation-focus">
       {!selectedMetadata && <section className="panel stack task-list">
-        <h2>{isPrivacyReviewer ? '经授权的审计个案' : filter === 'open' ? '分派给我的保护个案' : '我处理过的保护个案'}</h2>
+        <h2>{isPrivacyReviewer ? '经授权的审计个案' : actor.role === 'teacher' ? filter === 'open' ? '本校可读的保护个案' : '本校可读的已处理个案' : filter === 'open' ? '分派给我的保护个案' : '我处理过的保护个案'}</h2>
         <p className="muted small-text">列表只显示接手状态和必要摘要；求助全文在点开具体个案后逐次授权读取。</p>
         {!items.length && <Empty title={filter === 'open' ? '当前没有分派或授权给你的保护个案' : '还没有已处理记录'} description="无人接手不等于安全，值守与外部升级由预设负责人另行保障。" />}
         <div className="stack compact">{items.map(item => {
           const slaOverdue = item.status !== 'resolved' && !!item.slaDueAt && Date.parse(item.slaDueAt) < Date.parse(state.clock)
           return <button id={`operator-help-case-${item.id}`} key={item.id} type="button" className="operation-letter-row letter-select" onClick={() => setSearchParams({ kind: 'help', ...(filter === 'resolved' ? { status: 'resolved' } : {}), item: item.id }, { state: { returnContext: { to: queuePath, label: '返回保护个案', sourcePath: `${location.pathname}${location.search}`, sourceKey: location.key, focusId: `operator-help-case-${item.id}`, historyBack: true } } })}>
             <strong>{slaOverdue ? '已超过处理时限 · ' : ''}受限保护个案</strong>
-            <span>涉及：{item.reportedParty === 'volunteer' ? '志愿者' : item.reportedParty === 'teacher' ? '老师' : item.reportedParty === 'operator' ? '运营人员' : '其他／未说明'}</span>
+            <span>涉及：{item.reportedParty === 'volunteer' ? '志愿者' : item.reportedParty === 'teacher' ? '老师' : item.reportedParty === 'operator' ? '运营人员' : '其他／未说明'}{item.reportedPersonId && !state.people.some(person => person.id === item.reportedPersonId) ? ' · 相关人员信息受限' : ''}</span>
             <span className="letter-row-meta">{item.slaDueAt ? `处理时限 ${formatDate(item.slaDueAt)} · ` : ''}{item.status === 'open' ? '尚待接手' : item.status === 'claimed' ? '处理中' : '已处理'}</span>
           </button>
         })}</div>
@@ -614,7 +619,7 @@ function HelpCaseQueue({ state, actor, notify, mode = 'demo' }: Props) {
       {selectedMetadata && !selected && <section className="panel stack" aria-live="polite"><h2>正在取得受限个案内容</h2><p className="muted">普通任务快照不含求助全文；本次读取会校验回避关系并记录审计。</p>{contentError && <Notice tone="error">{contentError}</Notice>}</section>}
       {selected && <section className="panel stack">
         <div className="section-title"><h2>保护个案</h2><Badge tone="warning">{selected.status === 'open' ? '尚待接手' : selected.status === 'claimed' ? '处理中' : '已处理'}</Badge></div>
-        <p className="muted small-text">涉及对象：{selected.reportedParty === 'volunteer' ? '志愿者' : selected.reportedParty === 'teacher' ? '老师' : selected.reportedParty === 'operator' ? '运营人员' : '其他／不方便说'}{selected.reportedPersonId ? ` · ${nameOf(state, selected.reportedPersonId)}` : ' · 未要求孩子知道姓名'}</p>
+        <p className="muted small-text">涉及对象：{selected.reportedParty === 'volunteer' ? '志愿者' : selected.reportedParty === 'teacher' ? '老师' : selected.reportedParty === 'operator' ? '运营人员' : '其他／不方便说'}{selected.reportedPersonId ? ` · ${state.people.find(person => person.id === selected.reportedPersonId)?.nickname ?? '相关人员信息受限'}` : ' · 未要求孩子知道姓名'}</p>
         <div className="followup-note preserve-lines">{selected.body}</div>
         <Notice>{hasRestrictedGrant ? '本次正文读取来自双签审计或数据授权，只能用于批准的目的；读取与决定都会留痕。' : '先安排孩子安全与支持，避免反复询问。被反映者和回避名单中的人员不能读取、转派或关闭；疑似侵害或危险不得等待平台内部查实后才报告。'}</Notice>
         {canHandleCase && selected.status === 'open' && <button className="btn secondary" type="button" disabled={busy} onClick={() => void claim()}>记录我已接手</button>}

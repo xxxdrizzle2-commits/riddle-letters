@@ -500,6 +500,16 @@ describe('业务与保护闭环', () => {
     const expiresAt = new Date(Date.parse(state.clock) + 3_600_000).toISOString()
     expect(() => run(state, 'op1', { type: 'grant-access', userId: 't5', targetType: 'help-case', targetId: 'teacher-seat-case', caseId: 'teacher-seat-case', purpose: 'safeguarding-case', reason: '尝试给无保护席老师授权。', expiresAt })).toThrow('只能授权给')
   })
+  it('同校保护席备岗能在快照中看到可读个案，已结案历史不因负责人离任永久告警', () => {
+    const state = seed()
+    state.helpCases!.push({ id: 'school-backup-visible', requesterId: 'c1', pairId: 'p1', reportedParty: 'volunteer', reportedPersonId: 'v1', excludedActorIds: ['v1'], ownerId: 'op2', schoolOwnerId: 't1', status: 'open', body: '同校保护席备岗读取测试。', createdAt: state.clock, updatedAt: state.clock, severity: 'medium', reportRequired: false, history: [] })
+    const backupView = scopeState(state, 't3')
+    expect(backupView.helpCases?.find(item => item.id === 'school-backup-visible')?.body).toBe('同校保护席备岗读取测试。')
+
+    state.helpCases!.push({ id: 'resolved-history', requesterId: 'c1', pairId: 'p1', reportedParty: 'other', excludedActorIds: [], ownerId: 'op2', schoolOwnerId: 't1', status: 'resolved', body: '已结案合成历史。', createdAt: state.clock, updatedAt: state.clock, resolution: '已完成处置。', severity: 'medium', triagedAt: state.clock, triagedBy: 'op2', triageNote: '已完成分诊。', reportRequired: false, history: [] })
+    state.people.find(person => person.id === 't1')!.accountStatus = 'disabled'
+    expect(checkInvariants(state).filter(item => item.rule === 'CASE_OWNER_ELIGIBLE' && item.refs.includes('resolved-history'))).toEqual([])
+  })
   it('结案撤销处置权限，但仍可双签发放限期审计或数据申请授权', () => {
     let state = seed()
     state = run(state, 'op2', { type: 'update-help-report', id: 'case-1', reportDecision: 'reported', reportAuthority: '合成区未成年人保护中心', reportReceipt: 'SYN-AUDIT-001' })

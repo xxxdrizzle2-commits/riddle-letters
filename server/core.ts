@@ -172,6 +172,7 @@ function resultId(command: Command, previous: AppState, next: AppState): string 
   if (command.type === 'pause-volunteer') return command.volunteerId
   if (command.type === 'save-letter') return command.id ?? next.letters.find(item => !previous.letters.some(old => old.id === item.id))?.id ?? ''
   if (command.type === 'help') return next.helpCases?.find(item => !previous.helpCases?.some(old => old.id === item.id))?.id ?? ''
+  if (command.type === 'pause-pair') return next.helpCases?.find(item => item.pairId === command.id && !previous.helpCases?.some(old => old.id === item.id))?.id ?? ''
   if (command.type === 'grant-access' || command.type === 'open-emergency-access') return next.accessGrants?.find(item => !previous.accessGrants?.some(old => old.id === item.id))?.id ?? ''
   if (command.type === 'open-dispute') return next.disputeCases?.find(item => !previous.disputeCases?.some(old => old.id === item.id))?.id ?? ''
   return 'id' in command && typeof command.id === 'string' ? command.id : ''

@@ -326,7 +326,7 @@ test('求助表单先选涉及对象，匿名运营投诉绕开全部运营并�
 
   await as(page, 'teacher', 't1')
   await page.goto('/#/teacher/safeguarding')
-  await expect(page.getByRole('heading', { name: '分派给我的保护个案', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '本校可读的保护个案', exact: true })).toBeVisible()
   await page.getByRole('button').filter({ hasText: '涉及：运营人员' }).click()
   await expect(page.getByRole('heading', { name: '保护个案', exact: true })).toBeVisible()
   await expect(page.getByText(/我想反映一位运营人员的处理方式/)).toBeVisible()
@@ -349,6 +349,21 @@ test('求助表单先选涉及对象，匿名运营投诉绕开全部运营并�
   const accessibility = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
   expect(accessibility.violations).toEqual([])
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+})
+
+test('同校保护席备岗能从老师保护队列打开个案', async ({ page }, testInfo) => {
+  await page.getByRole('link', { name: '找人帮忙' }).click()
+  await page.getByLabel('这件事主要与谁有关？').selectOption('volunteer')
+  await page.getByLabel('与哪组书信有关？（可不选）').selectOption('p1')
+  await page.getByLabel('想说的话', { exact: true }).fill('我想请另一位学校保护老师一起看看这件事。')
+  await page.getByRole('button', { name: '提交到演示受限队列', exact: true }).click()
+
+  await as(page, 'teacher', 't3')
+  await page.goto('/#/teacher/safeguarding')
+  await expect(page.getByRole('heading', { name: '本校可读的保护个案', exact: true })).toBeVisible()
+  await page.getByRole('button').filter({ hasText: '涉及：志愿者' }).click()
+  await expect(page.getByText('我想请另一位学校保护老师一起看看这件事。', { exact: true })).toBeVisible()
+  if (process.env.PW_EVIDENCE_DIR) await page.screenshot({ path: `${process.env.PW_EVIDENCE_DIR}/teacher-backup-protection-${testInfo.project.name}.png`, fullPage: true })
 })
 
 test('陪伴计划和隐私说明明确成年试测与儿童试点边界', async ({ page }) => {

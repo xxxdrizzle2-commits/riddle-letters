@@ -80,7 +80,7 @@ export function checkInvariants(state: AppState): InvariantViolation[] {
     if (helpCase.status !== 'resolved' && owner?.role === 'teacher' && (!schoolId || safeguardingSeat(state, owner.id, now) !== schoolId)) {
       add('CASE_OWNER_ELIGIBLE', 'high', '未结案个案被分派给没有本校保护席的老师。', [helpCase.id, owner.id])
     }
-    if (helpCase.schoolOwnerId && (!schoolId || safeguardingSeat(state, helpCase.schoolOwnerId, now) !== schoolId)) {
+    if (helpCase.status !== 'resolved' && helpCase.schoolOwnerId && (!schoolId || safeguardingSeat(state, helpCase.schoolOwnerId, now) !== schoolId)) {
       add('CASE_OWNER_ELIGIBLE', 'high', '校方个案负责人没有对应学校的有效保护席。', [helpCase.id, helpCase.schoolOwnerId])
     }
     for (const holder of [helpCase.ownerId, helpCase.backupOwnerId, helpCase.schoolOwnerId]) {

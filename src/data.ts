@@ -74,6 +74,7 @@ export async function dispatch(actorId: string, original: Command): Promise<stri
     await db.snapshots.put(next)
     if (command.type === 'save-letter') return command.id ?? next.letters.find(l => !previous.letters.some(old => old.id === l.id))?.id ?? next.letters.find(l => l.pairId === command.pairId && l.replyTo === command.replyTo && l.createdBy === actorId && l.title === command.title.trim() && l.body === command.body && l.riddleId === command.riddleId && (l.moderation === 'draft' || l.moderation === 'returned'))?.id ?? ''
     if (command.type === 'match') return next.pairs.find(p => p.status !== 'ended' && p.childId === command.childId && p.volunteerId === command.volunteerId)?.id ?? ''
+    if (command.type === 'pause-pair') return next.helpCases?.find(item => item.pairId === command.id && !previous.helpCases?.some(old => old.id === item.id))?.id ?? ''
     return ''
   })
 }
