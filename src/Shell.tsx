@@ -17,6 +17,7 @@ const LetterDetail = lazy(() => import('./pages/Companions').then(module => ({ d
 const TeacherPage = lazy(() => import('./pages/Operations').then(module => ({ default: module.TeacherPage })))
 const TeacherQueuePage = lazy(() => import('./pages/Operations').then(module => ({ default: module.TeacherQueuePage })))
 const TeacherHistoryPage = lazy(() => import('./pages/Operations').then(module => ({ default: module.TeacherHistoryPage })))
+const TeacherSafeguardingPage = lazy(() => import('./pages/Operations').then(module => ({ default: module.TeacherSafeguardingPage })))
 const OperatorPage = lazy(() => import('./pages/Operations').then(module => ({ default: module.OperatorPage })))
 const OperatorReviewPage = lazy(() => import('./pages/Operations').then(module => ({ default: module.OperatorReviewPage })))
 const OperatorPairsPage = lazy(() => import('./pages/Operations').then(module => ({ default: module.OperatorPairsPage })))
@@ -225,6 +226,7 @@ function Shell() {
     <Route path="/letters/:id" element={guard(() => <LetterDetail key={actor!.id + location.pathname} {...props!}/>, ['child', 'volunteer'])}/>
     <Route path="/teacher/tasks/:stage" element={guard(() => <TeacherQueuePage key={actor!.id + location.pathname} {...props!} setDirty={setDirty} registerSaveDraft={registerSaveDraft}/>, ['teacher'])}/>
     <Route path="/teacher/history" element={guard(() => <TeacherHistoryPage key={actor!.id} {...props!}/>, ['teacher'])}/>
+    <Route path="/teacher/safeguarding" element={guard(() => <TeacherSafeguardingPage key={actor!.id} {...props!}/>, ['teacher'])}/>
     <Route path="/operator/review" element={guard(() => <OperatorReviewPage key={actor!.id} {...props!}/>, ['operator'])}/>
     <Route path="/operator/pairs" element={guard(() => <OperatorPairsPage key={actor!.id} {...props!}/>, ['operator'])}/>
     <Route path="/operator/followups" element={guard(() => <OperatorFollowupPage key={actor!.id} {...props!}/>, ['operator'])}/>
@@ -291,7 +293,7 @@ type NavItem = { to: string; label: string; icon: typeof Mail; group?: string }
 const roleNavigation: Record<Role, NavItem[]> = {
   child: [{ to: '/space', label: '信箱', icon: Mail }, { to: '/write', label: '写信', icon: Feather }, { to: '/account', label: '我的', icon: UserRound }],
   volunteer: [{ to: '/space', label: '陪伴任务', icon: HeartHandshake }, { to: '/write', label: '写信', icon: Feather }, { to: '/correspondence', label: '书信往来', icon: Mail }],
-  teacher: [{ to: '/space', label: '收发任务', icon: Mail }, { to: '/teacher/history', label: '处理记录', icon: BookOpen }, { to: '/account', label: '我的', icon: UserRound }],
+  teacher: [{ to: '/space', label: '收发任务', icon: Mail }, { to: '/teacher/safeguarding', label: '保护', icon: CheckCircle2 }, { to: '/teacher/history', label: '处理记录', icon: BookOpen }, { to: '/account', label: '我的', icon: UserRound }],
   operator: [{ to: '/space', label: '待处理', icon: HeartHandshake }, { to: '/operator/review', label: '审核', icon: Mail }, { to: '/operator/pairs', label: '结对', icon: Users }, { to: '/operator/followups', label: '跟进', icon: BookOpen }, { to: '/operator/safeguarding', label: '保护', icon: CheckCircle2 }, { to: '/operator/disputes', label: '争议', icon: Scale }, { to: '/operator/system-check', label: '自检', icon: Settings2 }],
 }
 function navActive(pathname: string, role: Role, to: string) {

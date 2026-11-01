@@ -322,7 +322,8 @@ describe('正式权限与受限求助', () => {
     expect(scopeState(helped, 'op2').helpCases?.some(item => item.id === help.id)).toBe(false)
     expect(scopeState(helped, 't1').helpCases?.some(item => item.id === help.id)).toBe(true)
     expect(() => run(helped, 'op1', { type: 'resolve-help-case', id: help.id, note: '已经处理完成' })).toThrow('被反映人')
-    expect(run(helped, 't1', { type: 'resolve-help-case', id: help.id, note: '已由校方保护负责人核实并安排支持。' }).helpCases?.find(item => item.id === help.id)?.status).toBe('resolved')
+    const triaged = run(helped, 't1', { type: 'triage-help-case', id: help.id, severity: 'medium', reportRequired: false, note: '由校方保护负责人完成分诊并安排支持。' })
+    expect(run(triaged, 't1', { type: 'resolve-help-case', id: help.id, note: '已由校方保护负责人核实并安排支持。' }).helpCases?.find(item => item.id === help.id)?.status).toBe('resolved')
   })
   it('平台独立保护人员不可用时，举报运营转交校方保护负责人而不是普通运营', () => {
     const state = seed()
@@ -341,7 +342,8 @@ describe('正式权限与受限求助', () => {
     const requesterView = scopeState(opened, 'c1').helpCases!.find(entry => entry.id === item.id)!
     expect(requesterView).toMatchObject({ body: '想反映一位老师，但不知道姓名。', ownerId: '', history: [] })
     expect(requesterView.backupOwnerId).toBeUndefined()
-    const resolved = run(opened, item.ownerId, { type: 'resolve-help-case', id: item.id, note: '已由独立人员处理并安排后续支持。' })
+    const triaged = run(opened, item.ownerId, { type: 'triage-help-case', id: item.id, severity: 'medium', reportRequired: false, note: '独立保护人员已完成分诊。' })
+    const resolved = run(triaged, item.ownerId, { type: 'resolve-help-case', id: item.id, note: '已由独立人员处理并安排后续支持。' })
     expect(scopeState(resolved, item.ownerId).helpCases).toHaveLength(0)
     const resolvedRequesterView = scopeState(resolved, 'c1').helpCases!.find(entry => entry.id === item.id)!
     expect(resolvedRequesterView).toMatchObject({ status: 'resolved', history: [], ownerId: '' })
@@ -435,6 +437,13 @@ describe('业务与保护闭环', () => {
     const wrongCase: Command = { ...command, targetId: 'l2' }
     expect(() => run(state, 'op1', wrongCase)).toThrow('没有可核对的关联')
   })
+  it('学校负责人不能跨校开启紧急破窗或签发敏感访问授权', () => {
+    const state = seed()
+    expect(() => run(state, 't1', { type: 'open-emergency-access', targetType: 'letter', targetId: 'l2', reason: '合成演练：需要紧急核实另一学校孩子的信件内容。' })).toThrow('本校')
+    state.helpCases!.push({ id: 'case-p2', requesterId: 'c2', pairId: 'p2', reportedParty: 'other', excludedActorIds: [], ownerId: 'op2', schoolOwnerId: 't2', status: 'open', body: '合成个案', createdAt: state.clock, updatedAt: state.clock, history: [] })
+    const expiresAt = new Date(Date.parse(state.clock) + 3_600_000).toISOString()
+    expect(() => run(state, 't1', { type: 'grant-access', userId: 'op2', targetType: 'letter', targetId: 'l2', caseId: 'case-p2', purpose: 'safeguarding-case', reason: '核对个案关联的指定信件。', expiresAt })).toThrow('本校')
+  })
   it('紧急破窗只作用于单个对象、两小时失效，未复核前拒绝第二次', () => {
     let state = seed()
     state = run(state, 'op1', { type: 'open-emergency-access', targetType: 'letter', targetId: 'l1', reason: '合成演练：来信出现紧急风险线索，需要立即核实。' })
@@ -459,6 +468,20 @@ describe('业务与保护闭环', () => {
     const reviewed = run(state, 'op3', { type: 'update-help-report', id: 'case-1', reportDecision: 'not-required', reportReason: '经独立复核，合成情境不构成法定报告。' })
     expect(reviewed.helpCases!.find(item => item.id === 'case-1')).toMatchObject({ reportRequired: true, reportDecision: 'not-required', reportReviewedBy: 'op3' })
     expect(run(reviewed, 'op2', { type: 'resolve-help-case', id: 'case-1', note: '已完成独立复核并安排支持。' }).helpCases!.find(item => item.id === 'case-1')?.status).toBe('resolved')
+  })
+  it('保护个案必须先分诊才能结案，老师的分诊、报告与结案使用同一保护席口径', () => {
+    let state = seed()
+    state.helpCases!.push({ id: 'untriaged', requesterId: 'c1', pairId: 'p1', reportedParty: 'other', excludedActorIds: [], ownerId: 'op2', schoolOwnerId: 't1', status: 'open', body: '待分诊合成个案', createdAt: state.clock, updatedAt: state.clock, severity: 'medium', reportRequired: false, history: [] })
+    expect(() => run(state, 'op2', { type: 'resolve-help-case', id: 'untriaged', note: '直接关闭个案。' })).toThrow('先完成分诊')
+    state = run(state, 'op2', { type: 'triage-help-case', id: 'untriaged', severity: 'medium', reportRequired: false, note: '已核实风险与响应时限。' })
+    expect(run(state, 'op2', { type: 'resolve-help-case', id: 'untriaged', note: '已完成处理并安排支持。' }).helpCases!.find(item => item.id === 'untriaged')?.status).toBe('resolved')
+
+    state = seed()
+    state.people.push({ id: 't5', role: 'teacher', schoolId: 'school-a', nickname: '无保护席老师', subtitle: '合成身份', avatar: '📙', interests: [] })
+    state.teacherAssignments!.push({ id: 'assignment-t5', schoolId: 'school-a', teacherId: 't5', childId: 'c1', scope: ['protect'], startsAt: state.clock, approvedBy: 'synthetic-school-a' })
+    state.helpCases!.push({ id: 'teacher-seat-case', requesterId: 'c1', pairId: 'p1', reportedParty: 'other', excludedActorIds: [], ownerId: 't5', schoolOwnerId: 't5', status: 'open', body: '保护席口径测试', createdAt: state.clock, updatedAt: state.clock, severity: 'medium', reportRequired: false, history: [] })
+    expect(() => run(state, 't5', { type: 'triage-help-case', id: 'teacher-seat-case', severity: 'medium', reportRequired: false, note: '尝试分诊。' })).toThrow('权限')
+    expect(() => run(state, 't5', { type: 'resolve-help-case', id: 'teacher-seat-case', note: '尝试关闭。' })).toThrow('没有关闭')
   })
   it('求助创建即有默认分诊时限，伪造争议信件或个案编号会被拒绝', () => {
     const state = seed()

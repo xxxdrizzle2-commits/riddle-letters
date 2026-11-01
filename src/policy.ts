@@ -95,7 +95,7 @@ const authorityAnywhere = (state: AppState, userId: string, kind: 'principal' | 
   (state.schoolAuthorities ?? []).some(item => item.userId === userId && item.kind === kind && !item.revokedAt && inWindow(item.startsAt, item.endsAt, now))
 
 /** Backup of the active safeguarding lead also carries the school protection seat. */
-const safeguardingSeat = (state: AppState, userId: string, now: string): string | undefined => {
+export const safeguardingSeat = (state: AppState, userId: string, now: string): string | undefined => {
   const direct = (state.schoolAuthorities ?? []).find(item => item.kind === 'safeguarding-lead' && item.userId === userId && !item.revokedAt && inWindow(item.startsAt, item.endsAt, now))
   if (direct) return direct.schoolId
   const backup = (state.schoolAuthorities ?? []).find(item => item.kind === 'safeguarding-lead' && item.backupUserId === userId && !item.revokedAt && inWindow(item.startsAt, item.endsAt, now))
@@ -123,6 +123,25 @@ const helpCaseById = (state: AppState, id: string) => (state.helpCases ?? []).fi
 const pairById = (state: AppState, id: string) => state.pairs.find(item => item.id === id)
 const letterById = (state: AppState, id: string) => state.letters.find(item => item.id === id)
 
+function letterForTarget(state: AppState, targetType: AccessTargetType, targetId: string): Letter | undefined {
+  if (targetType === 'letter') return letterById(state, targetId)
+  if (targetType !== 'attachment') return undefined
+  return state.letters.find(item => item.attachmentId === targetId || item.approvedRenditionId === targetId
+    || item.submissionVersions?.some(version => version.attachmentId === targetId || version.approvedRenditionId === targetId))
+}
+
+function helpCaseSchoolId(state: AppState, helpCase: HelpCase | undefined): string | undefined {
+  if (!helpCase) return undefined
+  if (helpCase.pairId) return pairById(state, helpCase.pairId)?.schoolId
+  return state.people.find(item => item.id === helpCase.requesterId)?.schoolId
+}
+
+function targetSchoolId(state: AppState, targetType: AccessTargetType, targetId: string): string | undefined {
+  if (targetType === 'help-case') return helpCaseSchoolId(state, helpCaseById(state, targetId))
+  const letter = letterForTarget(state, targetType, targetId)
+  return letter ? pairById(state, letter.pairId)?.schoolId : undefined
+}
+
 export function grantIsActive(grant: AccessGrant | undefined, now: string): grant is AccessGrant {
   return !!grant && !grant.revokedAt && inWindow(grant.startsAt, grant.expiresAt, now) && !!(grant.emergency || grant.approvedBy)
 }
@@ -138,13 +157,17 @@ export const activeGrantCount = (state: AppState, actorId: string, now: string) 
 const isSensitiveTarget = (type: AccessTargetType) => type === 'letter' || type === 'attachment' || type === 'help-case'
 
 function grantMatchesCase(state: AppState, grant: AccessGrant): boolean {
-  if (grant.emergency || !isSensitiveTarget(grant.targetType)) return true
+  if (!isSensitiveTarget(grant.targetType)) return true
+  const grantee = state.people.find(item => item.id === grant.actorId)
+  const targetSchool = targetSchoolId(state, grant.targetType, grant.targetId)
+  if (grantee?.role === 'teacher' && (!targetSchool || safeguardingSeat(state, grantee.id, state.clock) !== targetSchool)) return false
+  if (grant.emergency) return true
   const helpCase = grant.caseId ? helpCaseById(state, grant.caseId) : undefined
   if (!helpCase || helpCase.status === 'resolved' || isExcluded(helpCase, grant.actorId)) return false
+  const caseSchool = helpCaseSchoolId(state, helpCase)
+  if (targetSchool && caseSchool && targetSchool !== caseSchool) return false
   if (grant.targetType === 'help-case') return grant.targetId === helpCase.id
-  const letter = grant.targetType === 'letter'
-    ? letterById(state, grant.targetId)
-    : state.letters.find(item => item.attachmentId === grant.targetId || item.approvedRenditionId === grant.targetId || item.submissionVersions?.some(version => version.attachmentId === grant.targetId || version.approvedRenditionId === grant.targetId))
+  const letter = letterForTarget(state, grant.targetType, grant.targetId)
   return !!letter && !!helpCase.pairId && letter.pairId === helpCase.pairId
 }
 
@@ -302,8 +325,11 @@ export function authorize(input: PolicyInput): PolicyDecision {
     case 'grant-access': {
       if (actor.role === 'teacher') {
         const seatSchool = safeguardingSeat(state, actor.id, now)
-        if (seatSchool) return allow()
-        return deny('只有学校负责人可以审批本校敏感访问。', 'NO_SCHOOL_AUTHORITY')
+        if (!seatSchool) return deny('只有学校负责人可以审批本校敏感访问。', 'NO_SCHOOL_AUTHORITY')
+        const resourceSchool = resource.id && (resource.type === 'letter' || resource.type === 'attachment' || resource.type === 'help-case')
+          ? targetSchoolId(state, resource.type, resource.id) : undefined
+        if (!resourceSchool || resourceSchool !== seatSchool) return deny('学校负责人只能审批本校个案关联的敏感访问。', 'WRONG_SCHOOL')
+        return allow()
       }
       if (op) {
         if (!hasPlatformSignature(actor)) return deny('平台侧需要隐私或保护权限。', 'NO_PERMISSION_PACKAGE')
@@ -326,6 +352,9 @@ export function authorize(input: PolicyInput): PolicyDecision {
       if (!(op && hasPackage(actor, 'safeguarding'))) {
         const seat = safeguardingSeat(state, actor.id, now)
         if (!seat) return deny('只有保护岗或学校负责人可以开启紧急破窗。', 'NO_SCHOOL_AUTHORITY')
+        const resourceSchool = resource.id && (resource.type === 'letter' || resource.type === 'attachment' || resource.type === 'help-case')
+          ? targetSchoolId(state, resource.type, resource.id) : undefined
+        if (!resourceSchool || resourceSchool !== seat) return deny('学校负责人只能紧急查看本校的受保护对象。', 'WRONG_SCHOOL')
       }
       if (resource.type !== 'letter' && resource.type !== 'attachment' && resource.type !== 'help-case') return deny('紧急破窗只能针对单个受保护对象。', 'ROLE_NOT_PERMITTED')
       if ((input.reason ?? '').trim().length < 10) return deny('请写明至少 10 字的紧急理由。', 'NOTE_TOO_SHORT')
@@ -362,11 +391,13 @@ export function authorize(input: PolicyInput): PolicyDecision {
       const helpCase = resource.id ? helpCaseById(state, resource.id) : undefined
       if (!helpCase) return deny('保护个案不存在。', 'RESOURCE_NOT_FOUND')
       if (isExcluded(helpCase, actor.id)) return deny('被反映人不能关闭这个个案。', 'EXCLUDED_ACTOR')
+      const assigned = op && hasPackage(actor, 'safeguarding') && [helpCase.ownerId, helpCase.backupOwnerId].includes(actor.id)
+        || actor.role === 'teacher' && helpCase.schoolOwnerId === actor.id && !!safeguardingSeat(state, actor.id, now)
+      if (!assigned) return deny('没有关闭这个个案的权限。', 'NO_ASSIGNMENT')
+      if (!helpCase.triagedAt || !helpCase.triagedBy || !helpCase.triageNote) return deny('保护个案必须先完成分诊，再记录处置与结案。', 'REPORT_FIELDS_INCOMPLETE')
       if (!helpReportComplete(helpCase)) return deny('高严重度个案必须先完成报告记录或独立免报告复核。', 'REPORT_FIELDS_INCOMPLETE')
       if ((note ?? '').trim().length < 3) return deny('请记录至少 3 字的处理情况。', 'NOTE_TOO_SHORT')
-      if (op && hasPackage(actor, 'safeguarding') && [helpCase.ownerId, helpCase.backupOwnerId].includes(actor.id)) return allow()
-      if (actor.role === 'teacher' && helpCase.schoolOwnerId === actor.id) return allow()
-      return deny('没有关闭这个个案的权限。', 'NO_ASSIGNMENT')
+      return allow()
     }
     case 'open-dispute': {
       if (op) return hasPackage(actor, 'matching') || hasPackage(actor, 'safeguarding') ? allow() : deny('只有结对岗或保护岗可以发起争议。', 'NO_PERMISSION_PACKAGE')
@@ -474,5 +505,3 @@ export function authorize(input: PolicyInput): PolicyDecision {
 export function explain(decision: PolicyDecision): string | undefined {
   return decision.decision === 'deny' ? decision.reason : undefined
 }
-
-export const isSensitive = isSensitiveTarget

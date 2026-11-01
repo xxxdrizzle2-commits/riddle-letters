@@ -72,13 +72,15 @@ describe('command authorization responses', () => {
       store.state.people.push({ id: uid, role: 'operator', nickname: uid, subtitle: '', avatar: '', interests: [], accountStatus: 'active' })
     }
     const id = 'case-operator-1'
-    store.state.helpCases = [{ id, requesterId: identity.uid, reportedParty: 'operator', reportedPersonId: 'reported-operator', excludedActorIds: ['reported-operator'], ownerId: 'independent-handler', backupOwnerId: 'ordinary-help-backup', status: 'open', body: '需要独立保护人员处理。', createdAt: store.state.clock, updatedAt: store.state.clock, history: [] }]
+    store.state.helpCases = [{ id, requesterId: identity.uid, reportedParty: 'operator', reportedPersonId: 'reported-operator', excludedActorIds: ['reported-operator'], ownerId: 'independent-handler', backupOwnerId: 'ordinary-help-backup', status: 'open', body: '需要独立保护人员处理。', createdAt: store.state.clock, updatedAt: store.state.clock, severity: 'medium', triagedAt: store.state.clock, triagedBy: 'independent-handler', triageNote: '已完成合成分诊。', reportRequired: false, history: [] }]
+    const requesterOverview = await executeSnapshot(repository, identity, store.state.clock)
     const accusedView = await executeSnapshot(repository, { uid: 'reported-operator' })
     const overdueView = await executeSnapshot(repository, { uid: 'overdue-handler' })
     const handlerView = await executeSnapshot(repository, { uid: 'independent-handler' })
     expect(accusedView.state.helpCases?.some(item => item.id === id)).toBe(false)
     expect(overdueView.state.helpCases?.some(item => item.id === id)).toBe(false)
     expect(handlerView.state.helpCases?.find(item => item.id === id)).toMatchObject({ reportedPersonId: 'reported-operator', body: '' })
+    expect(requesterOverview.state.helpCases?.find(item => item.id === id)).toMatchObject({ body: '需要独立保护人员处理。', ownerId: '', history: [] })
     await expect(executeHelpCaseContentRead(repository, { uid: 'reported-operator' }, id)).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
     await expect(executeHelpCaseContentRead(repository, { uid: 'ordinary-help-backup' }, id)).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
     await expect(executeHelpCaseContentRead(repository, { uid: 'independent-handler' }, id)).resolves.toMatchObject({ body: '需要独立保护人员处理。' })
@@ -114,16 +116,17 @@ describe('command authorization responses', () => {
     store.state.deliveries = [{ letterId: 'letter-1' }]
     store.state.attachments = [{ id: 'attachment-1', pairId: 'pair-1', name: 'synthetic-original.webp', type: 'image/webp', ownerId: 'volunteer-1', storagePath: 'attachments/synthetic-original.webp' }, { id: 'approved-1', pairId: 'pair-1', name: 'synthetic-approved.webp', type: 'image/webp', ownerId: 'volunteer-1', storagePath: 'attachments/synthetic-approved.webp' }]
 
-    const overview = await executeSnapshot(repository, { uid: 'teacher-1' })
+    const overview = await executeSnapshot(repository, { uid: 'teacher-1' }, store.state.clock)
     expect(overview.state.letters.map(letter => letter.id)).toEqual(['letter-1'])
     expect(overview.state.letters[0]).toMatchObject({ id: 'letter-1', body: '', title: '', attachmentId: undefined, manuscriptAssetId: undefined, ocrRunId: undefined })
+    expect(store.accessAudit.filter(item => item.targetType === 'teacher-overview')).toHaveLength(0)
     const printView = await executeLetterContentRead(repository, { uid: 'teacher-1' }, 'letter-1')
     expect(printView).toMatchObject({ body: '仅用于权限测试', attachmentId: 'approved-1' })
     expect(printView).not.toHaveProperty('manuscriptAssetId')
     await expect(executeAttachmentContentRead(repository, { uid: 'teacher-1' }, 'approved-1')).resolves.toMatchObject({ storagePath: 'attachments/synthetic-approved.webp' })
     await expect(executeAttachmentContentRead(repository, { uid: 'teacher-1' }, 'attachment-1')).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
-    await expect(executeCommand(repository, { uid: 'teacher-2' }, { requestId: 'teacher-cross-pause-01', command: { type: 'pause-pair', id: 'pair-1', reason: '跨校测试' } })).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
-    await executeCommand(repository, { uid: 'teacher-1' }, { requestId: 'teacher-stop-delivery-01', command: { type: 'pause-pair', id: 'pair-1', reason: '需要保护性核实' } })
+    await expect(executeCommand(repository, { uid: 'teacher-2' }, { requestId: 'teacher-cross-pause-01', command: { type: 'pause-pair', id: 'pair-1', reason: '跨校测试' } }, store.state.clock)).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
+    await executeCommand(repository, { uid: 'teacher-1' }, { requestId: 'teacher-stop-delivery-01', command: { type: 'pause-pair', id: 'pair-1', reason: '需要保护性核实' } }, store.state.clock)
     expect(store.state.pairs[0]).toMatchObject({ status: 'paused', pauseReason: '保护性暂停：学校停止交付：需要保护性核实', pauseOwnerId: 'teacher-1' })
     expect(store.state.helpCases).toHaveLength(1)
     expect(store.state.disputeCases).toEqual([expect.objectContaining({ pairId: 'pair-1', status: 'joint-review' })])

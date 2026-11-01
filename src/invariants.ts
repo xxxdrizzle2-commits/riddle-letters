@@ -62,6 +62,9 @@ export function checkInvariants(state: AppState): InvariantViolation[] {
   }
 
   for (const helpCase of state.helpCases ?? []) {
+    if (helpCase.status === 'resolved' && (!helpCase.triagedAt || !helpCase.triagedBy || !helpCase.triageNote)) {
+      add('CASE_REPORT_COMPLETE', 'high', '保护个案未经分诊就已结案。', [helpCase.id])
+    }
     if (helpCase.status === 'resolved' && helpCase.severity === 'high' && helpCase.reportRequired) {
       if (!helpReportComplete(helpCase)) add('CASE_REPORT_COMPLETE', 'high', '高严重度个案已结案，但报告字段不完整。', [helpCase.id])
     }

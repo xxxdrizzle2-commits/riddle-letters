@@ -299,6 +299,8 @@ test('运营可安排新结对；孩子求助只进入运营处理流程', async
   await page.getByRole('button').filter({ hasText: '受限保护个案' }).click()
   await expect(page.getByRole('heading', { name: '保护个案', exact: true })).toBeVisible()
   await expect(page.getByText(/我还不知道第一封信可以聊些什么/)).toBeVisible()
+  await page.getByLabel('分诊依据', { exact: true }).fill('一般支持请求，安排老师提供可自由选择的话题。')
+  await page.getByRole('button', { name: '保存分诊', exact: true }).click()
   await page.getByLabel('实际行动、外部报告与后续支持', { exact: true }).fill('已记录想法，演示中安排老师提供三个可自由选择的话题。')
   await page.getByRole('button', { name: '保存处理并关闭站内个案', exact: true }).click()
   await page.getByRole('link', { name: '返回已处理保护个案', exact: true }).click()
@@ -306,7 +308,7 @@ test('运营可安排新结对；孩子求助只进入运营处理流程', async
   await expect(page.locator('.pre-submit-check').getByText(/已记录想法，演示中安排老师/)).toBeVisible()
 })
 
-test('求助表单先选涉及对象，运营投诉可提交并交给独立保护身份', async ({ page }, testInfo) => {
+test('求助表单先选涉及对象，匿名运营投诉绕开全部运营并交给校方保护负责人', async ({ page }, testInfo) => {
   await page.getByRole('link', { name: '找人帮忙' }).click()
   await expect(page.getByLabel('这件事主要与谁有关？')).toHaveValue('')
   await expect(page.getByLabel('想说的话', { exact: true })).toHaveCount(0)
@@ -314,11 +316,16 @@ test('求助表单先选涉及对象，运营投诉可提交并交给独立保�
   await expect(page.locator('.notice').filter({ hasText: '绕开普通运营队列' })).toBeVisible()
   await page.getByLabel('想说的话', { exact: true }).fill('我想反映一位运营人员的处理方式，但不希望普通运营队列看到。')
   await page.getByRole('button', { name: '提交到演示受限队列', exact: true }).click()
-  await expect(page.locator('.notice').filter({ hasText: '可切换未涉事的保护运营演示身份' })).toBeVisible()
+  await expect(page.locator('.notice').filter({ hasText: '状态为“尚待接手”' })).toBeVisible()
 
   const helpQueue = new URL('/#/operator/followups?kind=help', page.url()).toString()
   await as(page, 'operator', 'op2')
   await page.goto(helpQueue)
+  await expect(page.getByRole('heading', { name: '分派给我的保护个案', exact: true })).toBeVisible()
+  await expect(page.getByRole('button').filter({ hasText: '涉及：运营人员' })).toHaveCount(0)
+
+  await as(page, 'teacher', 't1')
+  await page.goto('/#/teacher/safeguarding')
   await expect(page.getByRole('heading', { name: '分派给我的保护个案', exact: true })).toBeVisible()
   await page.getByRole('button').filter({ hasText: '涉及：运营人员' }).click()
   await expect(page.getByRole('heading', { name: '保护个案', exact: true })).toBeVisible()

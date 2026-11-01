@@ -128,8 +128,9 @@ export function snapshot(store: Store, identity: Identity) {
   state.helpCases = (state.helpCases ?? []).filter(item => {
     try { authorizeHelpCaseContent(store, identity, item.id); return true } catch { return false }
   }).map(item => {
-    const visible = item.requesterId === identity.uid ? requesterHelpCaseProjection(item) : item
-    return { ...visible, body: '', resolution: undefined, history: [] }
+    const requester = item.requesterId === identity.uid
+    const visible = requester ? requesterHelpCaseProjection(item) : item
+    return { ...visible, body: requester ? visible.body : '', resolution: undefined, history: [] }
   })
   const mayManageAssignments = account.role === 'operator' && (account.permissions.includes('accounts') || account.permissions.includes('followup'))
   state.teacherAssignments = mayManageAssignments ? store.state.teacherAssignments ?? [] : account.role === 'teacher' ? (store.state.teacherAssignments ?? []).filter(item => item.teacherId === identity.uid) : []
@@ -143,26 +144,13 @@ export function snapshot(store: Store, identity: Identity) {
   return { state, profile, revision: store.revision, account: { ...account, application: store.applications.find(item => item.userId === identity.uid) } }
 }
 export async function executeSnapshot(repository: Repository, identity: Identity, now = new Date().toISOString()) {
-  const viewed = await repository.read(store => {
+  return repository.read(store => {
     getAccount(store, identity)
     const preview = structuredClone(store)
     syncPermissions(preview)
-    const refreshed = refreshState(preview.state, now)
-    const changed = JSON.stringify(store.state) !== JSON.stringify(refreshed)
-    preview.state = refreshed
-    return { result: snapshot(preview, identity), changed }
+    preview.state = refreshState(preview.state, now)
+    return snapshot(preview, identity)
   })
-  const result = !viewed.changed ? viewed.result : await repository.transact(store => {
-    getAccount(store, identity)
-    syncPermissions(store)
-    store.state = refreshState(store.state, now)
-    return snapshot(store, identity)
-  })
-  if (result.account.role === 'teacher') {
-    const childIds = [...new Set(result.state.pairs.map(pair => pair.childId))]
-    for (const childId of childIds.length ? childIds : [identity.uid]) await appendAccessAudit(repository, { id: randomUUID(), actorId: identity.uid, targetType: 'teacher-overview', targetId: childId, decision: 'allowed', purpose: childIds.length ? 'assigned-child-status' : 'assigned-children-empty-overview', at: now })
-  }
-  return result
 }
 function audit(store: Store, actorId: string, action: string, targetId?: string) {
   store.audit.push({ id: randomUUID(), actorId, action, targetId, at: store.state.clock })
@@ -195,6 +183,10 @@ export async function executeCommand(repository: Repository, identity: Identity,
     requireValue(input.command && commandTypes.has(input.command.type), '不支持此项操作')
     requireValue(!('file' in input.command) && !('actorId' in input.command), '请通过安全附件接口上传图片')
     requireValue(JSON.stringify(input.command).length < 30000, '内容过长，请缩短后再试')
+    const key = `${identity.uid}:${input.requestId}`; const hash = digest(JSON.stringify(input.command)); const previous = store.receipts[key]
+    if (previous) { requireValue(previous.hash === hash, '操作编号已用于其他内容', 'CONFLICT'); return { ...snapshot(store, identity), resultId: previous.resultId } }
+    if (input.expectedRevision !== undefined) requireValue(input.expectedRevision === store.revision, '内容已在另一台设备更新，请刷新后核对；你的输入仍然保留', 'CONFLICT')
+    store.state = refreshState(store.state, now)
     if (input.command.type === 'save-letter') { text(input.command.body, '正文', 12000, true); text(input.command.title ?? '', '标题', 120, true) }
     if (['match', 'resume-pair', 'end-pair', 'extend-task'].includes(input.command.type)) operator(account)
     if (command.type === 'pause-pair') {
@@ -253,10 +245,6 @@ export async function executeCommand(repository: Repository, identity: Identity,
         return !!pair && teacherHasScope(store, identity.uid, pair.childId, 'paper-delivery', now, pair.schoolId)
       }), '没有这些纸信的当前交付授权', 'FORBIDDEN')
     }
-    const key = `${identity.uid}:${input.requestId}`; const hash = digest(JSON.stringify(input.command)); const previous = store.receipts[key]
-    if (previous) { requireValue(previous.hash === hash, '操作编号已用于其他内容', 'CONFLICT'); return { ...snapshot(store, identity), resultId: previous.resultId } }
-    if (input.expectedRevision !== undefined) requireValue(input.expectedRevision === store.revision, '内容已在另一台设备更新，请刷新后核对；你的输入仍然保留', 'CONFLICT')
-    store.state.clock = now
     throttle(store, identity.uid, now)
     const previousState = store.state
     let nextState: AppState

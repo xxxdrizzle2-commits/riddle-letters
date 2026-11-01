@@ -97,7 +97,7 @@ export function createSeedState(): AppState {
     ],
     planPolicies: [{ id: 'main', childMaxActivePairs: 2, volunteerMaxActivePairs: 2, newPairCooldownDays: 7 }],
     helpCases: [
-      { id: 'case-1', requesterId: 'c3', reportedParty: 'volunteer', reportedPersonId: 'v1', excludedActorIds: ['v1'], ownerId: 'op2', status: 'claimed', body: '我想反映一些让我不舒服的话。', createdAt: '2026-10-18T08:00:00+08:00', updatedAt: '2026-10-18T09:00:00+08:00', claimedAt: '2026-10-18T09:00:00+08:00', severity: 'high', slaDueAt: '2026-10-19T11:00:00+08:00', reportRequired: true, history: [{ at: '2026-10-18T08:00:00+08:00', actorId: 'c3', note: '已提交求助，等待独立保护人员接手。' }, { at: '2026-10-18T09:00:00+08:00', actorId: 'op2', note: '保护人员已接手。' }] },
+      { id: 'case-1', requesterId: 'c3', reportedParty: 'volunteer', reportedPersonId: 'v1', excludedActorIds: ['v1'], ownerId: 'op2', status: 'claimed', body: '我想反映一些让我不舒服的话。', createdAt: '2026-10-18T08:00:00+08:00', updatedAt: '2026-10-18T09:00:00+08:00', claimedAt: '2026-10-18T09:00:00+08:00', severity: 'high', triagedAt: '2026-10-18T09:00:00+08:00', triagedBy: 'op2', triageNote: '出现疑似侵害风险线索，按高严重度处理。', slaDueAt: '2026-10-19T11:00:00+08:00', reportRequired: true, history: [{ at: '2026-10-18T08:00:00+08:00', actorId: 'c3', note: '已提交求助，等待独立保护人员接手。' }, { at: '2026-10-18T09:00:00+08:00', actorId: 'op2', note: '保护人员已接手并完成高严重度分诊。' }] },
     ],
   }
 }
@@ -161,7 +161,8 @@ export function deliveryRouteForLetter(state: AppState, letter: Letter): Deliver
 
 export function canHandleHelpCase(state: AppState, actor: Person, helpCase: HelpCase): boolean {
   if (![helpCase.ownerId, helpCase.backupOwnerId, helpCase.schoolOwnerId].includes(actor.id)) return false
-  return authorize({ actor, action: 'read-help-case', resource: { type: 'help-case', id: helpCase.id }, purpose: 'safeguarding-case', state, now: state.clock }).decision === 'allow'
+  const action = actor.role === 'teacher' ? 'triage-help-case' : 'read-help-case'
+  return authorize({ actor, action, resource: { type: 'help-case', id: helpCase.id }, purpose: 'safeguarding-case', state, now: state.clock }).decision === 'allow'
 }
 
 /** The requester may follow receipt/status and reread their own words, but does
@@ -408,7 +409,7 @@ function reconcileFollowups(state: AppState): void {
     const related = state.followups.filter(f => f.kind === 'overdue' && f.pairId === task.pairId && state.tasks.some(t => t.id === f.taskId && t.recipientId === task.recipientId))
     const open = related.find(f => f.status === 'open')
     const existing = open ?? related.find(f => f.status === 'resolved' && state.tasks.some(t => t.id === f.taskId && t.status !== 'completed'))
-    if (!existing) state.followups.push({ id: uid('overdue'), pairId: task.pairId, taskId: task.id, kind: 'overdue', status: 'open', note: '回信暂未收到。请先了解伙伴的近况与收发情况，温和跟进。', ownerId: state.people.find(p => hasPermission(p, 'administration'))?.id, createdAt: state.clock, updatedAt: state.clock })
+    if (!existing) state.followups.push({ id: `overdue-${task.id}`, pairId: task.pairId, taskId: task.id, kind: 'overdue', status: 'open', note: '回信暂未收到。请先了解伙伴的近况与收发情况，温和跟进。', ownerId: state.people.find(p => hasPermission(p, 'administration'))?.id, createdAt: state.clock, updatedAt: state.clock })
     else if (existing.status === 'open' && existing.taskId !== task.id) { existing.taskId = task.id; existing.updatedAt = state.clock }
     else if (existing.status === 'resolved' && existing.nextFollowupAt && Date.parse(state.clock) >= Date.parse(existing.nextFollowupAt)) { existing.status = 'open'; existing.updatedAt = state.clock; existing.taskId = task.id }
   }
@@ -857,13 +858,13 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       const pending = state.accessGrants!.find(grant => grant.actorId === command.userId && grant.targetType === command.targetType && grant.targetId === targetId && grant.caseId === command.caseId && grant.purpose === command.purpose && !grant.revokedAt && !grant.approvedBy)
       if (pending) {
         ensure(actor.id !== pending.grantedBy && actor.id !== pending.actorId, '第二签名必须由另一位、且不是受权人的负责人完成。', 'FORBIDDEN')
-        const second = authorize({ actor, action: 'grant-access', resource: { type: 'none' }, purpose: command.purpose, state, now: state.clock })
+        const second = authorize({ actor, action: 'grant-access', resource: { type: command.targetType, id: targetId }, purpose: command.purpose, state, now: state.clock })
         ensure(second.decision === 'allow', second.decision === 'deny' ? second.reason : '', 'FORBIDDEN')
         pending.approvedBy = actor.id
         break
       }
       ensure(actor.id !== grantee.id, '访问申请人不能给自己签发授权，须由另一位负责人发起。', 'FORBIDDEN')
-      const decision = authorize({ actor, action: 'grant-access', resource: { type: 'none' }, purpose: command.purpose, state, now: state.clock })
+      const decision = authorize({ actor, action: 'grant-access', resource: { type: command.targetType, id: targetId }, purpose: command.purpose, state, now: state.clock })
       ensure(decision.decision === 'allow', decision.decision === 'deny' ? decision.reason : '', 'FORBIDDEN')
       state.accessGrants!.push({ id: uid('access-grant'), actorId: command.userId, targetType: command.targetType, targetId, caseId: command.caseId, purpose: command.purpose, reason: command.reason.trim(), grantedBy: actor.id, startsAt: state.clock, expiresAt: new Date(command.expiresAt).toISOString() })
       break
@@ -1016,7 +1017,7 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
         const excludedActorIds = [reportedPersonId]
         const owner = state.people.find(person => eligibleHelpOwner(person, { reportedParty: 'volunteer', reportedPersonId, excludedActorIds }) && person.id !== actor.id)
         ensure(owner, '当前没有可独立接手的保护人员。')
-        state.helpCases!.push({ id: uid('help-case'), requesterId: actor.id, pairId: signal.pairIds[0], reportedParty: 'volunteer', reportedPersonId, excludedActorIds, ownerId: owner.id, status: 'open', body: `风险信号复核：${command.note.trim()}`, createdAt: state.clock, updatedAt: state.clock, severity: signal.severity, slaDueAt: addDays(state.clock, 2), reportRequired: signal.severity === 'high', history: [{ at: state.clock, actorId: actor.id, note: '由风险信号复核建立保护个案。' }] })
+        state.helpCases!.push({ id: uid('help-case'), requesterId: actor.id, pairId: signal.pairIds[0], reportedParty: 'volunteer', reportedPersonId, excludedActorIds, ownerId: owner.id, status: 'open', body: `风险信号复核：${command.note.trim()}`, createdAt: state.clock, updatedAt: state.clock, severity: signal.severity, triagedAt: state.clock, triagedBy: actor.id, triageNote: command.note.trim(), slaDueAt: addDays(state.clock, 2), reportRequired: signal.severity === 'high', history: [{ at: state.clock, actorId: actor.id, note: '由风险信号复核建立并完成初次分诊。' }] })
       }
       signal.status = command.action === 'dismiss' ? 'dismissed' : 'actioned'
       signal.reviewedBy = actor.id; signal.reviewedAt = state.clock
