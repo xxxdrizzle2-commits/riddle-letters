@@ -1,6 +1,6 @@
 import type { AppState, Attachment, Command, DeliveryRoute, HelpCase, Letter, Person, ReplyTask, Riddle, TeacherScope, TimeInterval } from './types'
 import { TRAINING_VERSION } from './types'
-import { authorize, teacherScope, eligibleHelpOwner, hasPackage, helpReportComplete, isExcluded, trainingFor } from './policy'
+import { authorize, teacherScope, eligibleHelpOwner, hasPackage, helpReportComplete, isExcluded, safeguardingSeat, trainingFor } from './policy'
 import { syntheticDigest } from './evidence'
 
 const DAY = 86_400_000
@@ -165,6 +165,11 @@ export function canHandleHelpCase(state: AppState, actor: Person, helpCase: Help
   return authorize({ actor, action, resource: { type: 'help-case', id: helpCase.id }, purpose: 'safeguarding-case', state, now: state.clock }).decision === 'allow'
 }
 
+function schoolForHelpCase(state: AppState, helpCase: Pick<HelpCase, 'pairId' | 'requesterId'>): string | undefined {
+  if (helpCase.pairId) return state.pairs.find(pair => pair.id === helpCase.pairId)?.schoolId
+  return state.people.find(person => person.id === helpCase.requesterId)?.schoolId
+}
+
 /** The requester may follow receipt/status and reread their own words, but does
  * not receive handler identities, conflict rules or internal case notes. */
 export function requesterHelpCaseProjection(helpCase: HelpCase): HelpCase {
@@ -283,10 +288,15 @@ export function scopeState(previous: AppState, actorId: string): AppState {
   const administered = hasPermission(actor, 'administration')
   const reviewPairs = new Set(hasPermission(actor, 'review') ? state.letters.filter(l => l.moderation === 'pending' && l.reviewAssigneeId === actorId).map(l => l.pairId) : [])
   const helpPairs = new Set(state.followups.filter(f => f.kind === 'help' && canHandleHelp(actor, f)).map(f => f.pairId))
-  const visibleHelpCases = state.helpCases?.filter(helpCase => helpCase.requesterId === actorId || canHandleHelpCase(state, actor, helpCase)) ?? []
-  for (const helpCase of visibleHelpCases) if (helpCase.pairId) helpPairs.add(helpCase.pairId)
+  const readableHelpCases = state.helpCases?.filter(helpCase => helpCase.requesterId === actorId || authorize({ actor, action: 'read-help-case', resource: { type: 'help-case', id: helpCase.id }, purpose: 'safeguarding-case', state, now: state.clock }).decision === 'allow') ?? []
+  const readableHelpCaseIds = new Set(readableHelpCases.map(helpCase => helpCase.id))
+  const oversightHelpCases = operator && hasPermission(actor, 'privacy')
+    ? (state.helpCases ?? []).filter(helpCase => !isExcluded(helpCase, actor.id))
+    : []
+  const visibleHelpCases = [...readableHelpCases, ...oversightHelpCases.filter(helpCase => !readableHelpCaseIds.has(helpCase.id))]
+  for (const helpCase of readableHelpCases) if (helpCase.pairId) helpPairs.add(helpCase.pairId)
   state.pairs = state.pairs.filter(p => administered || reviewPairs.has(p.id) || helpPairs.has(p.id) || (!operator && (p.childId === actorId || p.volunteerId === actorId || actor.role === 'teacher' && hasTeacherScope(state, actorId, p.childId, 'status'))))
-  const casePeople = visibleHelpCases.flatMap(helpCase => helpCase.requesterId === actorId ? [] : [helpCase.requesterId, helpCase.reportedPersonId].filter((id): id is string => !!id))
+  const casePeople = readableHelpCases.flatMap(helpCase => helpCase.requesterId === actorId ? [] : [helpCase.requesterId, helpCase.reportedPersonId].filter((id): id is string => !!id))
   const relatedIds = new Set([actorId, ...state.pairs.flatMap(p => [p.childId, p.volunteerId, p.teacherId]), ...casePeople])
   state.people = state.people.filter(p => administered || relatedIds.has(p.id) || (actor.role === 'teacher' && p.role === 'child' && hasTeacherScope(state, actorId, p.id, 'status')) || state.followups.some(f => f.kind === 'help' && f.requesterId === p.id && canHandleHelp(actor, f)))
   const directlyReadable = visibleLetters(state, actor)
@@ -307,7 +317,11 @@ export function scopeState(previous: AppState, actorId: string): AppState {
   state.tasks = state.tasks.filter(t => pairIds.has(t.pairId) && (administered || t.recipientId === actorId || actor.role === 'teacher' && state.pairs.some(p => p.id === t.pairId && t.recipientId === p.childId && hasTeacherScope(state, actorId, p.childId, 'status'))))
   state.reviews = state.reviews.filter(r => state.letters.some(l => l.id === r.letterId && (l.authorId === actorId || l.createdBy === actorId || hasPermission(actor, 'review'))))
   state.followups = state.followups.filter(f => f.kind === 'help' ? f.requesterId === actorId || canHandleHelp(actor, f) : operator && hasPermission(actor, 'administration'))
-  state.helpCases = visibleHelpCases.map(helpCase => helpCase.requesterId === actorId ? requesterHelpCaseProjection(helpCase) : helpCase)
+  state.helpCases = visibleHelpCases.map(helpCase => {
+    if (helpCase.requesterId === actorId) return requesterHelpCaseProjection(helpCase)
+    if (readableHelpCaseIds.has(helpCase.id)) return helpCase
+    return { ...helpCase, body: '', resolution: undefined, history: [] }
+  })
   state.teacherAssignments = state.teacherAssignments?.filter(assignment => administered || actor.role === 'teacher' && assignment.teacherId === actorId || actor.role === 'child' && assignment.childId === actorId)
   const visibleSchoolIds = new Set(state.people.map(person => person.schoolId).filter(Boolean))
   state.schools = state.schools?.filter(school => administered || visibleSchoolIds.has(school.id))
@@ -682,10 +696,10 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       if (teacherStop) {
         const ownerRule = { reportedParty: 'other' as const, reportedPersonId: undefined, excludedActorIds: [] as string[] }
         const owners = state.people.filter(person => eligibleHelpOwner(person, ownerRule))
-        const schoolOwner = state.people.find(person => person.role === 'teacher' && hasTeacherScope(state, person.id, pair.childId, 'protect'))
-        const owner = owners[0] ?? schoolOwner ?? actor
-        const caseId = uid('help-case')
-        state.helpCases!.push({
+        const schoolOwner = state.people.find(person => person.role === 'teacher' && !ownerRule.excludedActorIds.includes(person.id) && safeguardingSeat(state, person.id, state.clock) === pair.schoolId)
+        const owner = owners[0] ?? schoolOwner
+        const caseId = owner ? uid('help-case') : undefined
+        if (owner && caseId) state.helpCases!.push({
           id: caseId, requesterId: actor.id, pairId: pair.id, reportedParty: 'other', excludedActorIds: [], ownerId: owner.id,
           backupOwnerId: owners.find(person => person.id !== owner.id)?.id, schoolOwnerId: schoolOwner?.id,
           status: 'open', body: `学校老师已停止本校交付并上报异常：${command.reason.trim()}`,
@@ -775,7 +789,8 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       // When a child only knows that a teacher is involved, no teacher receives
       // the case until the independent platform handler has clarified conflicts.
       const unknownTeacher = reportedParty === 'teacher' && !reportedPerson
-      const schoolOwner = childId && !unknownTeacher ? state.people.find(person => person.role === 'teacher' && !excludedActorIds.includes(person.id) && hasTeacherScope(state, person.id, childId, 'protect')) : undefined
+      const schoolId = pair?.schoolId ?? state.people.find(person => person.id === childId)?.schoolId
+      const schoolOwner = schoolId && !unknownTeacher ? state.people.find(person => person.role === 'teacher' && !excludedActorIds.includes(person.id) && safeguardingSeat(state, person.id, state.clock) === schoolId) : undefined
       const owner = unknownOperator ? schoolOwner : owners[0] ?? schoolOwner
       ensure(owner, '当前没有可独立接手的保护人员，请使用页面列明的校方或外部渠道。')
       const helpCase: HelpCase = {
@@ -844,13 +859,15 @@ export function reduceCommand(previous: AppState, actorId: string, command: Comm
       ensure(grantee && grantee.accountStatus !== 'disabled', '请选择有效的受权账号。')
       ensure(['safeguarding-case', 'audit-review', 'data-request'].includes(command.purpose), '日常协助与打印权限不能通过人工授权扩大。', 'FORBIDDEN')
       const helpCase = state.helpCases!.find(item => item.id === command.caseId)
-      ensure(helpCase && helpCase.status !== 'resolved', '访问授权必须关联一个未结案的保护个案。', 'FORBIDDEN')
+      ensure(helpCase, '访问授权必须关联一个可核对的保护个案。', 'FORBIDDEN')
+      ensure(helpCase.status !== 'resolved' || ['audit-review', 'data-request'].includes(command.purpose), '结案后只能签发审计复核或数据申请授权。', 'FORBIDDEN')
       ensure(!isExcluded(helpCase, actor.id) && !isExcluded(helpCase, grantee.id), '被反映人或回避人员不能签发或取得访问授权。', 'FORBIDDEN')
       const linkedLetter = command.targetType === 'letter' ? state.letters.find(item => item.id === targetId)
         : command.targetType === 'attachment' ? state.letters.find(item => item.attachmentId === targetId || item.approvedRenditionId === targetId || item.submissionVersions?.some(version => version.attachmentId === targetId || version.approvedRenditionId === targetId)) : undefined
       ensure(command.targetType === 'help-case' ? targetId === helpCase.id : !!helpCase.pairId && linkedLetter?.pairId === helpCase.pairId, '受权对象与保护个案没有可核对的关联。', 'FORBIDDEN')
+      const caseSchoolId = schoolForHelpCase(state, helpCase)
       const qualifiedGrantee = grantee.role === 'operator' && (hasPermission(grantee, 'safeguarding') || hasPermission(grantee, 'privacy'))
-        || grantee.role === 'teacher' && helpCase.schoolOwnerId === grantee.id
+        || grantee.role === 'teacher' && helpCase.schoolOwnerId === grantee.id && !!caseSchoolId && safeguardingSeat(state, grantee.id, state.clock) === caseSchoolId
       ensure(qualifiedGrantee, '只能授权给该个案中未涉事的保护或隐私处理人。', 'FORBIDDEN')
       ensure(command.reason.trim().length >= 5, '请写明至少 5 字的访问理由。')
       ensure(Number.isFinite(Date.parse(command.expiresAt)) && Date.parse(command.expiresAt) > Date.parse(state.clock), '授权到期时间应晚于现在。')

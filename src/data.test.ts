@@ -332,8 +332,16 @@ describe('正式权限与受限求助', () => {
     expect(routed.helpCases!.at(-1)).toMatchObject({ ownerId: 't1', schoolOwnerId: 't1' })
     state.people.find(p => p.id === 'op1')!.permissions = ['administration']
     state.people.find(p => p.id === 't1')!.accountStatus = 'disabled'
-    expect(() => run(state, 'c1', { type: 'help', body: '我需要帮助。', reportedParty: 'other' })).toThrow('没有可独立接手')
-    expect(state.helpCases).toHaveLength(1)
+    const rerouted = run(state, 'c1', { type: 'help', body: '我需要帮助。', reportedParty: 'other' })
+    expect(rerouted.helpCases!.at(-1)).toMatchObject({ ownerId: 't3', schoolOwnerId: 't3' })
+  })
+  it('学校没有有效保护席时不把个案分给普通 protect 指派老师', () => {
+    const state = seed()
+    state.schoolAuthorities = []
+    state.teacherAssignments!.push({ id: 'ordinary-protect', schoolId: 'school-a', teacherId: 't3', childId: 'c1', scope: ['protect'], startsAt: state.clock, approvedBy: 'synthetic-school-a' })
+    const routed = run(state, 'c1', { type: 'help', body: '我需要独立人员帮助。', reportedParty: 'other' })
+    expect(routed.helpCases!.at(-1)).toMatchObject({ ownerId: 'op1', schoolOwnerId: undefined })
+    expect(() => run(state, 'c1', { type: 'help', body: '想反映一位运营，但不知道姓名。', reportedParty: 'operator' })).toThrow('没有可独立接手')
   })
   it('不知道涉事老师姓名时不把个案正文交给任何老师，结案后原处理人撤权', () => {
     const opened = run(seed(), 'c1', { type: 'help', body: '想反映一位老师，但不知道姓名。', reportedParty: 'teacher' })
@@ -462,9 +470,16 @@ describe('业务与保护闭环', () => {
     expect(done.helpCases!.find(item => item.id === 'case-1')!.status).toBe('resolved')
   })
   it('个案负责人不能取消报告要求，免报告必须由独立隐私复核人确认', () => {
-    const state = seed()
+    let state = seed()
     expect(() => run(state, 'op2', { type: 'update-help-report', id: 'case-1', reportRequired: false } as unknown as Command)).toThrow('不能由负责人自行取消')
     expect(() => run(state, 'op2', { type: 'update-help-report', id: 'case-1', reportDecision: 'not-required', reportReason: '不构成报告' })).toThrow('隐私复核人')
+    expect(() => run(state, 'op3', { type: 'update-help-report', id: 'case-1', reportDecision: 'not-required', reportReason: '经独立复核，合成情境不构成法定报告。' })).toThrow('双签审计授权')
+    const expiresAt = new Date(Date.parse(state.clock) + 3_600_000).toISOString()
+    const grant: Command = { type: 'grant-access', userId: 'op3', targetType: 'help-case', targetId: 'case-1', caseId: 'case-1', purpose: 'audit-review', reason: '独立复核是否构成法定报告。', expiresAt }
+    state = run(state, 'op1', grant)
+    expect(scopeState(state, 'op3').helpCases?.find(item => item.id === 'case-1')?.body).toBe('')
+    state = run(state, 't1', grant)
+    expect(scopeState(state, 'op3').helpCases?.find(item => item.id === 'case-1')?.body).toBe('我想反映一些让我不舒服的话。')
     const reviewed = run(state, 'op3', { type: 'update-help-report', id: 'case-1', reportDecision: 'not-required', reportReason: '经独立复核，合成情境不构成法定报告。' })
     expect(reviewed.helpCases!.find(item => item.id === 'case-1')).toMatchObject({ reportRequired: true, reportDecision: 'not-required', reportReviewedBy: 'op3' })
     expect(run(reviewed, 'op2', { type: 'resolve-help-case', id: 'case-1', note: '已完成独立复核并安排支持。' }).helpCases!.find(item => item.id === 'case-1')?.status).toBe('resolved')
@@ -482,6 +497,28 @@ describe('业务与保护闭环', () => {
     state.helpCases!.push({ id: 'teacher-seat-case', requesterId: 'c1', pairId: 'p1', reportedParty: 'other', excludedActorIds: [], ownerId: 't5', schoolOwnerId: 't5', status: 'open', body: '保护席口径测试', createdAt: state.clock, updatedAt: state.clock, severity: 'medium', reportRequired: false, history: [] })
     expect(() => run(state, 't5', { type: 'triage-help-case', id: 'teacher-seat-case', severity: 'medium', reportRequired: false, note: '尝试分诊。' })).toThrow('权限')
     expect(() => run(state, 't5', { type: 'resolve-help-case', id: 'teacher-seat-case', note: '尝试关闭。' })).toThrow('没有关闭')
+    const expiresAt = new Date(Date.parse(state.clock) + 3_600_000).toISOString()
+    expect(() => run(state, 'op1', { type: 'grant-access', userId: 't5', targetType: 'help-case', targetId: 'teacher-seat-case', caseId: 'teacher-seat-case', purpose: 'safeguarding-case', reason: '尝试给无保护席老师授权。', expiresAt })).toThrow('只能授权给')
+  })
+  it('结案撤销处置权限，但仍可双签发放限期审计或数据申请授权', () => {
+    let state = seed()
+    state = run(state, 'op2', { type: 'update-help-report', id: 'case-1', reportDecision: 'reported', reportAuthority: '合成区未成年人保护中心', reportReceipt: 'SYN-AUDIT-001' })
+    state = run(state, 'op2', { type: 'resolve-help-case', id: 'case-1', note: '已完成报告并安排后续支持。' })
+    const expiresAt = new Date(Date.parse(state.clock) + 3_600_000).toISOString()
+    const auditGrant: Command = { type: 'grant-access', userId: 'op3', targetType: 'help-case', targetId: 'case-1', caseId: 'case-1', purpose: 'audit-review', reason: '结案后复核处置记录与报告闭环。', expiresAt }
+    expect(() => run(state, 'op1', { ...auditGrant, purpose: 'safeguarding-case' })).toThrow('结案后只能签发')
+    state = run(state, 'op1', auditGrant)
+    state = run(state, 't1', auditGrant)
+    expect(scopeState(state, 'op3').helpCases?.find(item => item.id === 'case-1')?.body).toBe('我想反映一些让我不舒服的话。')
+    expect(scopeState(state, 'op2').helpCases?.some(item => item.id === 'case-1')).toBe(false)
+  })
+  it('未结案个案超过 SLA 会形成高严重度自检，隐私岗只见元数据', () => {
+    const state = seed()
+    state.helpCases!.push({ id: 'sla-overdue', requesterId: 'c1', pairId: 'p1', reportedParty: 'other', excludedActorIds: [], ownerId: 'op2', schoolOwnerId: 't1', status: 'open', body: '合成超时个案正文', createdAt: '2026-10-17T09:00:00+08:00', updatedAt: '2026-10-17T09:00:00+08:00', severity: 'medium', slaDueAt: '2026-10-18T09:00:00+08:00', reportRequired: false, history: [] })
+    expect(checkInvariants(state)).toContainEqual(expect.objectContaining({ rule: 'HELP_CASE_SLA', severity: 'high', refs: ['sla-overdue'] }))
+    const privacyView = scopeState(state, 'op3')
+    expect(privacyView.helpCases?.find(item => item.id === 'sla-overdue')).toMatchObject({ body: '', status: 'open', slaDueAt: '2026-10-18T09:00:00+08:00' })
+    expect(checkInvariants(privacyView)).toContainEqual(expect.objectContaining({ rule: 'HELP_CASE_SLA', refs: ['sla-overdue'] }))
   })
   it('求助创建即有默认分诊时限，伪造争议信件或个案编号会被拒绝', () => {
     const state = seed()

@@ -126,7 +126,9 @@ export function snapshot(store: Store, identity: Identity) {
   state.manuscriptAssets = []
   state.ocrRuns = []
   state.helpCases = (state.helpCases ?? []).filter(item => {
-    try { authorizeHelpCaseContent(store, identity, item.id); return true } catch { return false }
+    try { authorizeHelpCaseContent(store, identity, item.id); return true } catch {
+      return account.role === 'operator' && account.permissions.includes('privacy') && item.body === ''
+    }
   }).map(item => {
     const requester = item.requesterId === identity.uid
     const visible = requester ? requesterHelpCaseProjection(item) : item

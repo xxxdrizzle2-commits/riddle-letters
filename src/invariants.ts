@@ -1,9 +1,9 @@
 import type { AppState } from './types'
-import { helpReportComplete, teacherScope } from './policy'
+import { helpReportComplete, safeguardingSeat, teacherScope } from './policy'
 
 export type InvariantRule =
   | 'PAIR_VALIDITY' | 'LETTER_IDENTITY' | 'PAPER_EVENT_ORDER'
-  | 'CASE_REPORT_COMPLETE' | 'EXCLUSION_CLEAN'
+  | 'CASE_REPORT_COMPLETE' | 'HELP_CASE_SLA' | 'CASE_OWNER_ELIGIBLE' | 'EXCLUSION_CLEAN'
   | 'GRANT_LIFECYCLE' | 'EMERGENCY_REVIEWED' | 'DELIVERY_DURING_SAFETY_PAUSE'
   | 'PAIR_UNIQUE' | 'PAUSE_METADATA' | 'RISK_SIGNAL_RESOLVED'
 
@@ -62,6 +62,9 @@ export function checkInvariants(state: AppState): InvariantViolation[] {
   }
 
   for (const helpCase of state.helpCases ?? []) {
+    if (helpCase.status !== 'resolved' && helpCase.slaDueAt && Date.parse(helpCase.slaDueAt) < Date.parse(now)) {
+      add('HELP_CASE_SLA', 'high', '保护个案超过分诊或处置时限仍未结案。', [helpCase.id])
+    }
     if (helpCase.status === 'resolved' && (!helpCase.triagedAt || !helpCase.triagedBy || !helpCase.triageNote)) {
       add('CASE_REPORT_COMPLETE', 'high', '保护个案未经分诊就已结案。', [helpCase.id])
     }
@@ -71,6 +74,15 @@ export function checkInvariants(state: AppState): InvariantViolation[] {
   }
 
   for (const helpCase of state.helpCases ?? []) {
+    const pair = helpCase.pairId ? state.pairs.find(item => item.id === helpCase.pairId) : undefined
+    const schoolId = pair?.schoolId ?? person(helpCase.requesterId)?.schoolId
+    const owner = person(helpCase.ownerId)
+    if (helpCase.status !== 'resolved' && owner?.role === 'teacher' && (!schoolId || safeguardingSeat(state, owner.id, now) !== schoolId)) {
+      add('CASE_OWNER_ELIGIBLE', 'high', '未结案个案被分派给没有本校保护席的老师。', [helpCase.id, owner.id])
+    }
+    if (helpCase.schoolOwnerId && (!schoolId || safeguardingSeat(state, helpCase.schoolOwnerId, now) !== schoolId)) {
+      add('CASE_OWNER_ELIGIBLE', 'high', '校方个案负责人没有对应学校的有效保护席。', [helpCase.id, helpCase.schoolOwnerId])
+    }
     for (const holder of [helpCase.ownerId, helpCase.backupOwnerId, helpCase.schoolOwnerId]) {
       if (!holder) continue
       if (helpCase.excludedActorIds.includes(holder) || helpCase.reportedPersonId === holder) add('EXCLUSION_CLEAN', 'high', '个案的负责人位于回避集合中。', [helpCase.id, holder])

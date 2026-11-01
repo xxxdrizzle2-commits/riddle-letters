@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { emptyStore, executeAttachmentContentRead, executeCommand, executeHelpCaseContentRead, executeLetterContentRead, executeSnapshot, ServiceError, type Repository } from './core'
+import { createSeedState, normalizeState } from '../src/domain'
 
 function repositoryForRole(role: 'child' | 'volunteer' | 'teacher') {
   const store = emptyStore('2026-10-21T00:00:00.000Z')
@@ -14,6 +15,24 @@ function repositoryForRole(role: 'child' | 'volunteer' | 'teacher') {
 }
 
 describe('command authorization responses', () => {
+  it('requires a double-signed audit grant before a privacy reviewer can read or decide a help report', async () => {
+    const store = emptyStore('2026-10-19T09:00:00+08:00')
+    store.state = normalizeState(createSeedState())
+    store.accounts.op1 = { uid: 'op1', role: 'operator', status: 'active', permissions: ['help'], createdAt: store.state.clock }
+    store.accounts.op2 = { uid: 'op2', role: 'operator', status: 'active', permissions: ['help', 'help-independent'], createdAt: store.state.clock }
+    store.accounts.op3 = { uid: 'op3', role: 'operator', status: 'active', permissions: ['privacy'], createdAt: store.state.clock }
+    store.accounts.t1 = { uid: 't1', role: 'teacher', status: 'active', permissions: [], createdAt: store.state.clock }
+    const repository: Repository = { read: operation => operation(store), transact: operation => operation(store) }
+    await expect(executeHelpCaseContentRead(repository, { uid: 'op3' }, 'case-1', store.state.clock)).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
+    await expect(executeCommand(repository, { uid: 'op3' }, { requestId: 'privacy-no-grant-report', command: { type: 'update-help-report', id: 'case-1', reportDecision: 'not-required', reportReason: '尚未取得授权。' } }, store.state.clock)).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
+    const grant = { type: 'grant-access' as const, userId: 'op3', targetType: 'help-case' as const, targetId: 'case-1', caseId: 'case-1', purpose: 'audit-review' as const, reason: '独立复核是否构成法定报告。', expiresAt: '2026-10-19T10:00:00+08:00' }
+    await executeCommand(repository, { uid: 'op1' }, { requestId: 'privacy-grant-first', command: grant }, store.state.clock)
+    await expect(executeHelpCaseContentRead(repository, { uid: 'op3' }, 'case-1', store.state.clock)).rejects.toMatchObject({ code: 'FORBIDDEN' } satisfies Partial<ServiceError>)
+    await executeCommand(repository, { uid: 't1' }, { requestId: 'privacy-grant-second', command: grant }, store.state.clock)
+    await expect(executeHelpCaseContentRead(repository, { uid: 'op3' }, 'case-1', store.state.clock)).resolves.toMatchObject({ body: '我想反映一些让我不舒服的话。' })
+    await expect(executeCommand(repository, { uid: 'op3' }, { requestId: 'privacy-reviewed-report', command: { type: 'update-help-report', id: 'case-1', reportDecision: 'not-required', reportReason: '经独立复核，合成情境不构成法定报告。' } }, store.state.clock)).resolves.toBeTruthy()
+    expect(store.accessAudit.filter(item => item.actorId === 'op3' && item.targetId === 'case-1').map(item => item.decision)).toEqual(['denied', 'denied', 'allowed'])
+  })
   it('returns FORBIDDEN for a teacher attempting to create a pairing and leaves the store unchanged', async () => {
     const { store, repository, identity } = repositoryForRole('teacher')
 
@@ -104,6 +123,7 @@ describe('command authorization responses', () => {
       store.state.people.push({ id: uid, role, nickname: uid, subtitle: '', avatar: '', interests: [], accountStatus: 'active', schoolId: uid === 'teacher-2' ? 'school-2' : 'school-1' })
     }
     store.state.schools = [{ id: 'school-1', name: '合成学校一', status: 'active' }, { id: 'school-2', name: '合成学校二', status: 'active' }]
+    store.state.schoolAuthorities = [{ id: 'authority-1', schoolId: 'school-1', userId: 'teacher-1', kind: 'safeguarding-lead', startsAt: '2026-10-01T00:00:00.000Z', endsAt: '2026-11-01T00:00:00.000Z', approvedBy: 'synthetic-school' }]
     store.state.teacherAssignments = [
       { id: 'assignment-1', schoolId: 'school-1', teacherId: 'teacher-1', childId: 'child-1', scope: ['status', 'paper-delivery'], startsAt: '2026-10-01T00:00:00.000Z', endsAt: '2026-11-01T00:00:00.000Z', approvedBy: 'school-owner' },
       { id: 'assignment-2', schoolId: 'school-2', teacherId: 'teacher-2', childId: 'child-1', scope: ['status', 'paper-delivery'], startsAt: '2026-10-01T00:00:00.000Z', endsAt: '2026-11-01T00:00:00.000Z', approvedBy: 'school-owner-2' },

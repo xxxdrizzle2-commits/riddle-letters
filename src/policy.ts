@@ -96,6 +96,7 @@ const authorityAnywhere = (state: AppState, userId: string, kind: 'principal' | 
 
 /** Backup of the active safeguarding lead also carries the school protection seat. */
 export const safeguardingSeat = (state: AppState, userId: string, now: string): string | undefined => {
+  if (!activeAccount(state.people.find(item => item.id === userId))) return undefined
   const direct = (state.schoolAuthorities ?? []).find(item => item.kind === 'safeguarding-lead' && item.userId === userId && !item.revokedAt && inWindow(item.startsAt, item.endsAt, now))
   if (direct) return direct.schoolId
   const backup = (state.schoolAuthorities ?? []).find(item => item.kind === 'safeguarding-lead' && item.backupUserId === userId && !item.revokedAt && inWindow(item.startsAt, item.endsAt, now))
@@ -163,7 +164,8 @@ function grantMatchesCase(state: AppState, grant: AccessGrant): boolean {
   if (grantee?.role === 'teacher' && (!targetSchool || safeguardingSeat(state, grantee.id, state.clock) !== targetSchool)) return false
   if (grant.emergency) return true
   const helpCase = grant.caseId ? helpCaseById(state, grant.caseId) : undefined
-  if (!helpCase || helpCase.status === 'resolved' || isExcluded(helpCase, grant.actorId)) return false
+  if (!helpCase || isExcluded(helpCase, grant.actorId)) return false
+  if (helpCase.status === 'resolved' && !['audit-review', 'data-request'].includes(grant.purpose)) return false
   const caseSchool = helpCaseSchoolId(state, helpCase)
   if (targetSchool && caseSchool && targetSchool !== caseSchool) return false
   if (grant.targetType === 'help-case') return grant.targetId === helpCase.id
@@ -237,7 +239,7 @@ export function authorize(input: PolicyInput): PolicyDecision {
           && (letter.deliveryRoute ?? (pair.channel === 'paper' ? 'school-paper' : 'online')) === 'school-paper'
           && !state.deliveries.some(item => item.letterId === letter.id && item.deliveredAt)
           && teacherScope(state, actor.id, pair.childId, 'paper-delivery', now)
-        const grant = grantFor(state, actor.id, 'letter', letter.id, now, ['deliver-print', 'safeguarding-case', 'emergency-risk'])
+        const grant = grantFor(state, actor.id, 'letter', letter.id, now, ['deliver-print', 'safeguarding-case', 'emergency-risk', 'audit-review', 'data-request'])
         if (capture || delivery) return allow()
         if (grant) return allow(grant.id)
         return deny('这封信不在当前协助、交付或经批准的访问范围内。', 'NO_ASSIGNMENT')
@@ -266,7 +268,8 @@ export function authorize(input: PolicyInput): PolicyDecision {
       if (!helpCase) return deny('保护个案不存在。', 'RESOURCE_NOT_FOUND')
       if (helpCase.requesterId === actor.id) return allow()
       if (isExcluded(helpCase, actor.id)) return deny('你是被反映人或需要回避的人员，不能读取这个个案。', 'EXCLUDED_ACTOR')
-      if (helpCase.status === 'resolved') return deny('个案已结案，原处理权限已撤销。', 'NO_ASSIGNMENT')
+      const grant = grantFor(state, actor.id, 'help-case', helpCase.id, now, ['safeguarding-case', 'emergency-risk', 'audit-review', 'data-request'])
+      if (helpCase.status === 'resolved') return grant ? allow(grant.id) : deny('个案已结案，原处理权限已撤销；审计或数据申请须另行双签授权。', 'NO_ASSIGNMENT')
       if (op && hasPackage(actor, 'safeguarding') && [helpCase.ownerId, helpCase.backupOwnerId].includes(actor.id)
         && (helpCase.reportedParty !== 'operator' || hasPackage(actor, 'independentSafeguarding'))) return allow()
       if (actor.role === 'teacher' && helpCase.schoolOwnerId === actor.id) {
@@ -277,7 +280,6 @@ export function authorize(input: PolicyInput): PolicyDecision {
         const schoolId = helpCase.pairId ? pairById(state, helpCase.pairId)?.schoolId : undefined
         if (schoolId && safeguardingSeat(state, actor.id, now) === schoolId) return allow()
       }
-      const grant = grantFor(state, actor.id, 'help-case', helpCase.id, now, ['safeguarding-case', 'emergency-risk'])
       return grant ? allow(grant.id) : deny('没有这个保护个案的读取权限。', 'NO_ASSIGNMENT')
     }
     case 'read-risk-signal': {
@@ -376,7 +378,10 @@ export function authorize(input: PolicyInput): PolicyDecision {
       const helpCase = resource.id ? helpCaseById(state, resource.id) : undefined
       if (!helpCase) return deny('保护个案不存在。', 'RESOURCE_NOT_FOUND')
       if (isExcluded(helpCase, actor.id)) return deny('被反映人或回避人员不能填写报告。', 'EXCLUDED_ACTOR')
-      if (action === 'update-help-report' && op && hasPackage(actor, 'privacy')) return allow()
+      if (action === 'update-help-report' && op && hasPackage(actor, 'privacy')) {
+        const grant = grantFor(state, actor.id, 'help-case', helpCase.id, now, ['audit-review'])
+        return grant ? allow(grant.id) : deny('隐私复核人须先取得该个案的双签审计授权，读取必要内容后才能填写报告结论。', 'GRANT_NOT_FOUND')
+      }
       if (op && hasPackage(actor, 'safeguarding') && [helpCase.ownerId, helpCase.backupOwnerId].includes(actor.id)) return allow()
       if (actor.role === 'teacher' && helpCase.schoolOwnerId === actor.id && safeguardingSeat(state, actor.id, now)) return allow()
       return deny('没有填写这个个案报告的权限。', 'NO_ASSIGNMENT')
